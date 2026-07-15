@@ -1,0 +1,28 @@
+# Build output
+**/bin/
+**/obj/
+
+# Generated packages and local build artifacts
+artifacts/
+dist/
+
+# Runtime traces, local server state, and generated ledgers
+server_worlds/
+worldtrace/
+*.log
+*.jsonl
+docs/latest-ledger.json
+
+# Local editor and OS files
+.vs/
+.vscode/
+*.user
+*.suo
+Thumbs.db
+Desktop.ini
+
+# Do not commit copied game/mod binaries from local installs.
+BepInEx/
+*.dll
+*.pdb
+!src/**/*.cs
