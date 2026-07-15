@@ -9,6 +9,7 @@ This is intentionally separate from the old COTLMP fork. The fork may be used fo
 - `src/COTLOnline.Diagnostics` - BepInEx diagnostics plugin for tracing game lifecycle, save, combat, spawn, and packet-shaped `sync.*` events.
 - `src/COTLOnline.ServerLedger` - command-line prototype that consumes diagnostics JSONL traces and reconstructs server-owned run/world/player/equipment state.
 - `docs/HEADLESS_FEASIBILITY.md` - running notes on what can plausibly move to a command-prompt server versus what is Unity-bound.
+- `releases/COTLOnline-0.5.33-enemy-authority-observe.zip` - latest packaged test build with usage notes in `docs/RELEASE_PACKAGE_USAGE.md`.
 
 ## First Milestone
 

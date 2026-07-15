@@ -80,7 +80,7 @@ With `0.5.5+`, the plugin reduces live world-identity hitches by caching the sta
 
 With `0.5.6+`, high-frequency live packets still go to the server but are no longer written to the JSONL trace file by default. Leave `TraceHighFrequencyPackets=false` for movement testing; only turn it on for short captures where packet-level disk logs matter more than hitch-free play.
 
-With `0.5.7+`, the server can pin the intended host by client id. Start ServerLedger with `--host-client-id client-872f6e7370` on this test setup so the desktop remains `host-lamb` even if the laptop connects first. The plugin also draws lightweight remote-player world markers by default; the laptop should see a `P1` marker for the host's relayed position.
+With `0.5.7+`, the server can pin the intended host by client id. Start ServerLedger with `--host-client-id <host-client-id>` so the desktop remains `host-lamb` even if the laptop connects first. The plugin also draws lightweight remote-player world markers by default; the laptop should see a `P1` marker for the host's relayed position.
 
 With `0.5.8+`, the laptop/remote-p2 client also has `RemoteHostVisualMirror=true` by default. Once the server assigns the laptop `role=remote-p2` and relays host-lamb motion/input, the laptop should automatically spawn a local vanilla P2 visual body and drive it from the host's relayed state. This is not authoritative gameplay yet; it is a visual mirror so the laptop can see host P1 as an actor instead of only a marker.
 
@@ -130,7 +130,7 @@ For this phase, avoid follower interactions on the remote P2. Follower positions
 Expected Phase8 signs:
 
 - host server console prints `[cult]` lines from both clients every few seconds when the active cult scene is loaded;
-- host client should become the cult baseline when started with `--host-client-id client-872f6e7370`;
+- host client should become the cult baseline when started with `--host-client-id <host-client-id>`;
 - laptop may show `cult=False` even when `slotOk=True`, which confirms live follower/task divergence instead of install/config failure.
 
 Known dungeon limitation:
