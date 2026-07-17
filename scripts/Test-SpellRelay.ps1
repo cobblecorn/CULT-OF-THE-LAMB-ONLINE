@@ -84,8 +84,8 @@ try {
     $hostClient.Connect('127.0.0.1', $Port)
     $remoteClient.Connect('127.0.0.1', $Port)
 
-    Send-TraceEvent $hostClient 'live.heartbeat' 'clientId=client-sol-host sessionId=host-session pluginVersion=0.5.33 scene=Dungeon2 location=Dungeon1_2 room=Room_A'
-    Send-TraceEvent $remoteClient 'live.heartbeat' 'clientId=client-sol-remote sessionId=remote-session pluginVersion=0.5.33 scene=Dungeon2 location=Dungeon1_2 room=Room_A'
+    Send-TraceEvent $hostClient 'live.heartbeat' 'clientId=client-sol-host sessionId=host-session pluginVersion=0.5.34 scene=Dungeon2 location=Dungeon1_2 room=Room_A'
+    Send-TraceEvent $remoteClient 'live.heartbeat' 'clientId=client-sol-remote sessionId=remote-session pluginVersion=0.5.34 scene=Dungeon2 location=Dungeon1_2 room=Room_A'
     [void](Receive-Category $hostClient 'server.roster' 1200)
     [void](Receive-Category $remoteClient 'server.roster' 1200)
 

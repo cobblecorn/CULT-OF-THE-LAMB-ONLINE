@@ -13,7 +13,7 @@ namespace COTLOnline.Diagnostics
     {
         public const string PluginGuid = "com.codex.cotlonline.diagnostics";
         public const string PluginName = "COTL Online Diagnostics";
-        public const string PluginVersion = "0.5.33";
+        public const string PluginVersion = "0.5.34";
 
         private Harmony _harmony;
         private ConfigEntry<bool> _verboseSnapshots;

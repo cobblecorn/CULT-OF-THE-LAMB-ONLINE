@@ -7,7 +7,7 @@ This repository is an experimental online-play research workspace for Cult of th
 - `COTLOnline.Diagnostics` is the BepInEx plugin loaded by each game client.
 - `COTLOnline.ServerLedger` is a UDP/server-ledger prototype that assigns host/remote roles and relays compact server packets.
 - Save slot 4 is currently treated as the shared online test slot.
-- The most recent build line is `0.5.33`, which starts observe-only host enemy authority through `server.enemy_authority`.
+- The most recent build line is `0.5.34`, which adds scoped bridge-owned body guards on top of observe-only host enemy authority.
 
 ## What Works Best So Far
 

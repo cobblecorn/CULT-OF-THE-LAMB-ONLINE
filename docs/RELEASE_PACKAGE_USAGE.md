@@ -5,7 +5,7 @@ This document explains how to use the latest packaged test build from this repos
 Current package:
 
 ```text
-releases/COTLOnline-0.5.33-enemy-authority-observe.zip
+releases/COTLOnline-0.5.34-bridge-body-guards.zip
 ```
 
 ## What Is Inside
@@ -13,6 +13,7 @@ releases/COTLOnline-0.5.33-enemy-authority-observe.zip
 - `BepInEx/plugins/COTLOnline.Diagnostics.dll` - the client-side BepInEx plugin.
 - `server/COTLOnline.ServerLedger.dll` - the UDP server/ledger prototype.
 - `docs/` - setup notes, current findings, project status, and SOL authority audit.
+- `docs/EXTERNAL_COTLMP_REVIEW.md` - notes on which external COTLMP fork ideas are useful and which are intentionally not copied wholesale.
 - `scripts/Test-SpellRelay.ps1` - local smoke test for the spell relay packet path.
 
 The package does not include Cult of the Lamb game assemblies, BepInEx itself, saves, server worlds, generated traces, or private local configuration.
@@ -89,9 +90,17 @@ dotnet run --project ".\src\COTLOnline.ServerLedger\COTLOnline.ServerLedger.cspr
   - one `role=host-lamb`
   - one `role=remote-p2`
 
-## What To Test In 0.5.33
+## What To Test In 0.5.34
 
-The current priority is enemy authority observation. Enter a dungeon on both clients and watch:
+The current priority is making sure bridge-owned proxy/mirror bodies stop stealing vanilla focus or interactions while enemy authority remains observe-only. Test both base and dungeon movement:
+
+- host P2 proxy should not pull the host camera away by being added as a camera target
+- remote host mirror should not pull the P2 client's camera away
+- interacting with altar/buildings/podiums should not switch control to the bridge-owned visual body
+- F9/F10 should still reserve/clear host P2 as before
+- dungeon seed/reward/loadout behavior should be no worse than `0.5.33`
+
+Enemy authority observation is still active. Enter a dungeon on both clients and watch:
 
 - overlay `enemy authority: host=... room=... enemies=... match=...`
 - server `[combat]`, `[spawn]`, `[encounter]`, and `[spell]` lines
@@ -106,7 +115,7 @@ Useful signs:
 
 ## Known Limitations
 
-- Enemy authority is observe-only in `0.5.33`; remote enemies are not suppressed or driven by host commands yet.
+- Enemy authority is observe-only in `0.5.34`; remote enemies are not suppressed or driven by host commands yet.
 - Follower/cult AI is still local and can diverge quickly.
 - Death/revive/game-over is not server-authoritative yet.
 - Dungeon seed/reward/loadout authority is partially working, but not final.

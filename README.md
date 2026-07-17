@@ -9,7 +9,7 @@ This is intentionally separate from the old COTLMP fork. The fork may be used fo
 - `src/COTLOnline.Diagnostics` - BepInEx diagnostics plugin for tracing game lifecycle, save, combat, spawn, and packet-shaped `sync.*` events.
 - `src/COTLOnline.ServerLedger` - command-line prototype that consumes diagnostics JSONL traces and reconstructs server-owned run/world/player/equipment state.
 - `docs/HEADLESS_FEASIBILITY.md` - running notes on what can plausibly move to a command-prompt server versus what is Unity-bound.
-- `releases/COTLOnline-0.5.33-enemy-authority-observe.zip` - latest packaged test build with usage notes in `docs/RELEASE_PACKAGE_USAGE.md`.
+- `releases/COTLOnline-0.5.34-bridge-body-guards.zip` - latest packaged test build with usage notes in `docs/RELEASE_PACKAGE_USAGE.md`.
 
 ## First Milestone
 
@@ -17,6 +17,10 @@ This is intentionally separate from the old COTLMP fork. The fork may be used fo
 2. Capture a trace from normal play.
 3. Use the trace to identify save/world, room, combat, and lifecycle choke points.
 4. Only then design the server-owned world protocol.
+
+## External References
+
+This project is not a drop-in replacement of another COTLMP fork. External COTLMP work is used as research material where useful, especially for LAN UX, save-transfer ideas, and co-op lifecycle guard patterns. See `docs/EXTERNAL_COTLMP_REVIEW.md`.
 
 ## Build
 
@@ -174,6 +178,7 @@ Useful config values:
 
 ## Versions
 
+- `0.5.34` - selectively adapts the useful co-op lifecycle guard pattern found in external COTLMP research without replacing this bridge architecture. Bridge-owned remote P2/mirror bodies are now blocked from becoming `SetMainPlayer`, from firing generic `Interaction.OnInteract`, from being hidden through `PlayerFarming.HidePlayer`, and from being added to `CameraFollowTarget` target lists. This should reduce camera/control theft, altar/building interaction softlocks, and invisible/respawning bridge bodies while leaving the real local player untouched.
 - `0.5.33` - starts Phase14 enemy authority in observe-only mode. ServerLedger now sends `server.enemy_authority` packets based on the assigned host-lamb combat roster, and the overlay shows the host room, enemy hash/count, and whether the local client matches it. This does not suppress remote enemies or drive AI yet; it is the first host-authority feed needed before enemy spawn/death/room-clear commands. The server reducer also no longer lets a first-seen client presence line swallow useful `sync.*` events such as spell casts.
 - `0.5.32` - changes spell relay from zero-damage replay to normal visual replay plus a guarded damage suppressor. Relayed casts now spawn with their normal visual parameters, while `[Phase11] SpellRelayVisualOnly=true` makes `Health.DealDamage` skip damage from bridge-owned relayed spell objects. This should let projectiles/area effects appear without letting the receiving client author enemy health. `phase11.*` receive-side relay diagnostics are now also sent to ServerLedger and printed as `[spell]` lines so misses such as `space_mismatch`, `bridge_body_unavailable`, or `apply_error` are visible in the server console.
 - `0.5.31` - selectively imports the useful SOL spell-relay work into the active bridge without replacing this project with the SOL fork. Completed local spell casts now emit sequenced `sync.spell_cast` events after a successful `PlayerSpells.CastSpell`, ServerLedger relays recent casts as `server.spell_casts`, and receivers replay each cast once on the opposite bridge-owned body. Replay is visual-only by default through `[Phase11] SpellRelayVisualOnly=true`, so the receiving client does not intentionally author enemy damage until enemy authority is ready. The SOL authority audit is kept in `docs/SOL_AUTHORITY_AUDIT.md`, and `scripts/Test-SpellRelay.ps1` smoke-tests the packet path.

@@ -199,7 +199,7 @@ internal static partial class Program
             Console.WriteLine("Preferred host client: " + ledger.PreferredHostClientId);
         }
 
-        Console.WriteLine("Start/restart the game with COTLOnline.Diagnostics 0.5.33+ loaded for host enemy authority diagnostics, guarded spell-cast relay, encounter diagnostics, loadout de-dupe, frame-state relay, seed-wait, pinned-host remote P2, remote-away, and cult-state diagnostics.");
+        Console.WriteLine("Start/restart the game with COTLOnline.Diagnostics 0.5.34+ loaded for scoped bridge body guards, host enemy authority diagnostics, guarded spell-cast relay, encounter diagnostics, loadout de-dupe, frame-state relay, seed-wait, pinned-host remote P2, remote-away, and cult-state diagnostics.");
         Console.WriteLine("Press Ctrl+C to stop.");
 
         while (!cancellationToken.IsCancellationRequested)
