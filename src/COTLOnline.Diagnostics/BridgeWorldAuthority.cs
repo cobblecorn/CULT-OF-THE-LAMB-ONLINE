@@ -11,47 +11,66 @@ namespace COTLOnline.Diagnostics
     internal static class BridgeWorldAuthority
     {
         private static bool _enabled;
+        private static bool _followerAuthorityEnabled;
         private static float _snapshotInterval;
+        private static float _followerCatalogInterval;
         private static float _nextSnapshotAt;
+        private static float _nextFollowerCatalogAt;
         private static int _sequence;
         private static string _lastOverlayLine = "world authority: disabled";
 
-        public static void Configure(bool enabled, float snapshotInterval)
+        public static void Configure(bool enabled, float snapshotInterval, bool followerAuthorityEnabled, float followerCatalogInterval)
         {
             _enabled = enabled;
+            _followerAuthorityEnabled = followerAuthorityEnabled;
             _snapshotInterval = Mathf.Max(0.5f, snapshotInterval);
+            _followerCatalogInterval = Mathf.Max(0.25f, followerCatalogInterval);
             _nextSnapshotAt = 0f;
+            _nextFollowerCatalogAt = 0f;
             _sequence = 0;
-            _lastOverlayLine = enabled ? "world authority: waiting" : "world authority: disabled";
+            _lastOverlayLine = enabled || followerAuthorityEnabled ? "world authority: waiting" : "world authority: disabled";
 
             WorldTrace.Record(
                 "phase8.config",
                 "worldAuthorityDiagnostics=" + enabled
-                + " cultSnapshotInterval=" + WorldTrace.FormatFloat(_snapshotInterval));
+                + " cultSnapshotInterval=" + WorldTrace.FormatFloat(_snapshotInterval)
+                + " followerAuthority=" + followerAuthorityEnabled
+                + " followerCatalogInterval=" + WorldTrace.FormatFloat(_followerCatalogInterval));
         }
 
         public static void Tick()
         {
-            if (!_enabled)
+            if (!_enabled && !_followerAuthorityEnabled)
             {
                 _lastOverlayLine = "world authority: disabled";
                 return;
             }
 
             float now = Time.unscaledTime;
-            if (now < _nextSnapshotAt)
+            bool emitCultSnapshot = _enabled && now >= _nextSnapshotAt;
+            bool emitFollowerCatalog = _followerAuthorityEnabled && now >= _nextFollowerCatalogAt;
+            if (!emitCultSnapshot && !emitFollowerCatalog)
             {
                 return;
             }
 
-            _nextSnapshotAt = now + _snapshotInterval;
+            if (emitCultSnapshot)
+            {
+                _nextSnapshotAt = now + _snapshotInterval;
+            }
+
+            if (emitFollowerCatalog)
+            {
+                _nextFollowerCatalogAt = now + _followerCatalogInterval;
+            }
+
             if (IsDungeonLocation())
             {
                 _lastOverlayLine = "world authority: paused in dungeon";
                 return;
             }
 
-            RecordCultSnapshot(now);
+            RecordCultSnapshot(now, emitCultSnapshot, emitFollowerCatalog);
         }
 
         public static string OverlayLine()
@@ -59,7 +78,7 @@ namespace COTLOnline.Diagnostics
             return _enabled ? _lastOverlayLine : "";
         }
 
-        private static void RecordCultSnapshot(float now)
+        private static void RecordCultSnapshot(float now, bool emitCultSnapshot, bool emitFollowerCatalog)
         {
             try
             {
@@ -90,29 +109,56 @@ namespace COTLOnline.Diagnostics
                     + " active=" + activeFollowers
                     + " match=" + worldMatch;
 
-                WorldTrace.Record(
-                    "sync.cult_snapshot",
-                    "clientId=" + Clean(DiagnosticsPlugin.ClientId)
-                    + " sessionId=" + Clean(DiagnosticsPlugin.SessionId)
-                    + " seq=" + _sequence
-                    + " scene=" + Clean(scene)
-                    + " location=" + Clean(location)
-                    + " role=" + Clean(role)
-                    + " worldId=" + Clean(roster.WorldId)
-                    + " worldHost=" + Clean(roster.WorldHost)
-                    + " worldMatch=" + Clean(worldMatch)
-                    + " saveSlot=" + Clean(saveSlot)
-                    + " hash=" + Clean(followerHash)
-                    + " followers=" + rows.Count
-                    + " dataFollowers=" + dataFollowers
-                    + " activeFollowers=" + activeFollowers
-                    + " structures=" + structures
-                    + " cultFaith=" + WorldTrace.FormatFloat(cultFaith)
-                    + " staticFaith=" + WorldTrace.FormatFloat(staticFaith)
-                    + " day=" + currentDay
-                    + " elapsed=" + WorldTrace.FormatFloat(elapsed)
-                    + " preview=" + Clean(preview)
-                    + " unscaledTime=" + WorldTrace.FormatFloat(now));
+                if (emitCultSnapshot)
+                {
+                    WorldTrace.Record(
+                        "sync.cult_snapshot",
+                        "clientId=" + Clean(DiagnosticsPlugin.ClientId)
+                        + " sessionId=" + Clean(DiagnosticsPlugin.SessionId)
+                        + " seq=" + _sequence
+                        + " scene=" + Clean(scene)
+                        + " location=" + Clean(location)
+                        + " role=" + Clean(role)
+                        + " worldId=" + Clean(roster.WorldId)
+                        + " worldHost=" + Clean(roster.WorldHost)
+                        + " worldMatch=" + Clean(worldMatch)
+                        + " saveSlot=" + Clean(saveSlot)
+                        + " hash=" + Clean(followerHash)
+                        + " followers=" + rows.Count
+                        + " dataFollowers=" + dataFollowers
+                        + " activeFollowers=" + activeFollowers
+                        + " structures=" + structures
+                        + " cultFaith=" + WorldTrace.FormatFloat(cultFaith)
+                        + " staticFaith=" + WorldTrace.FormatFloat(staticFaith)
+                        + " day=" + currentDay
+                        + " elapsed=" + WorldTrace.FormatFloat(elapsed)
+                        + " preview=" + Clean(preview)
+                        + " unscaledTime=" + WorldTrace.FormatFloat(now));
+                }
+
+                if (emitFollowerCatalog)
+                {
+                    WorldTrace.Record(
+                        "sync.follower_catalog",
+                        "clientId=" + PacketClean(DiagnosticsPlugin.ClientId)
+                        + " sessionId=" + PacketClean(DiagnosticsPlugin.SessionId)
+                        + " seq=" + _sequence
+                        + " scene=" + PacketClean(scene)
+                        + " location=" + PacketClean(location)
+                        + " role=" + PacketClean(role)
+                        + " worldId=" + PacketClean(roster.WorldId)
+                        + " worldHost=" + PacketClean(roster.WorldHost)
+                        + " saveSlot=" + PacketClean(saveSlot)
+                        + " hash=" + PacketClean(followerHash)
+                        + " followers=" + rows.Count
+                        + " dataFollowers=" + dataFollowers
+                        + " activeFollowers=" + activeFollowers
+                        + " structures=" + structures
+                        + " cultFaith=" + WorldTrace.FormatFloat(cultFaith)
+                        + " day=" + currentDay
+                        + " catalog=" + BuildFollowerCatalog(rows)
+                        + " unscaledTime=" + WorldTrace.FormatFloat(now));
+                }
             }
             catch (Exception ex)
             {
@@ -238,6 +284,40 @@ namespace COTLOnline.Diagnostics
             return sb.ToString();
         }
 
+        private static string BuildFollowerCatalog(List<FollowerSnapshotRow> rows)
+        {
+            if (rows.Count == 0)
+            {
+                return "none";
+            }
+
+            StringBuilder sb = new StringBuilder(rows.Count * 128);
+            for (int i = 0; i < rows.Count; i++)
+            {
+                if (i > 0)
+                {
+                    sb.Append(";");
+                }
+
+                FollowerSnapshotRow row = rows[i];
+                sb.Append(row.Id)
+                    .Append("|name=").Append(PacketClean(row.Name))
+                    .Append("|loc=").Append(PacketClean(row.Location))
+                    .Append("|home=").Append(PacketClean(row.HomeLocation))
+                    .Append("|task=").Append(PacketClean(row.Task))
+                    .Append("|state=").Append(PacketClean(row.State))
+                    .Append("|pos=").Append(PacketClean(row.Position))
+                    .Append("|faith=").Append(Round(row.Faith))
+                    .Append("|happy=").Append(Round(row.Happiness))
+                    .Append("|sat=").Append(Round(row.Satiation))
+                    .Append("|age=").Append(row.Age)
+                    .Append("|curse=").Append(PacketClean(row.CursedState))
+                    .Append("|active=").Append(row.Active ? "True" : "False");
+            }
+
+            return sb.ToString();
+        }
+
         private static string BuildFollowerPreview(List<FollowerSnapshotRow> rows, int limit)
         {
             StringBuilder sb = new StringBuilder(256);
@@ -345,6 +425,23 @@ namespace COTLOnline.Diagnostics
             }
 
             return value.Replace(" ", "_").Replace("\r", "_").Replace("\n", "_").Replace("|", "_").Replace(",", "_");
+        }
+
+        private static string PacketClean(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return "unknown";
+            }
+
+            return value
+                .Replace(" ", "_")
+                .Replace("\t", "_")
+                .Replace("\r", "_")
+                .Replace("\n", "_")
+                .Replace("|", "/")
+                .Replace(";", ",")
+                .Replace("=", ":");
         }
 
         private static int SafeInt(Func<int> read, int fallback)

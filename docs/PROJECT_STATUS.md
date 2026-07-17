@@ -7,7 +7,7 @@ This repository is an experimental online-play research workspace for Cult of th
 - `COTLOnline.Diagnostics` is the BepInEx plugin loaded by each game client.
 - `COTLOnline.ServerLedger` is a UDP/server-ledger prototype that assigns host/remote roles and relays compact server packets.
 - Save slot 4 is currently treated as the shared online test slot.
-- The most recent build line is `0.5.35`, which starts guarded server-save authority on top of scoped bridge-owned body guards and observe-only host enemy authority.
+- The most recent build line is `0.5.36`, which starts host follower authority on top of guarded server-save authority and observe-only host enemy authority.
 
 ## What Works Best So Far
 
@@ -16,11 +16,12 @@ This repository is an experimental online-play research workspace for Cult of th
 - Dungeon seed/reward/loadout authority is partially working and can produce matching podium items.
 - Camera split can let players move farther apart without forcing the vanilla co-op midpoint camera.
 - Spell cast relay has a guarded visual replay path, with server-visible `phase11.*` diagnostics.
+- Host follower catalogs are relayed by stable `FollowerInfo.ID`, and non-host clients can apply guarded follower position correction in cult/base scenes.
 
 ## Known Gaps
 
 - Enemy authority is not active yet. Enemies, evil follower events, room clear, HP, and death timing can still diverge.
-- Follower/cult AI is still locally simulated and diverges quickly after matching save loads.
+- Follower/cult AI decisions are still locally simulated. `0.5.36` starts position correction, but jobs/interactions/events are not command-authoritative yet.
 - Death/revive/game-over needs an explicit online rule instead of relying on vanilla local transitions.
 - Spell visuals are still experimental and may fail per curse type or body/room mismatch.
 - Server-save authority is now an alpha transport/apply layer for the reserved online slot. It does not yet make live building placement, follower jobs, enemies, or room events server-authoritative.

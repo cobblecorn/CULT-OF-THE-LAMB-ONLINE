@@ -199,7 +199,7 @@ internal static partial class Program
             Console.WriteLine("Preferred host client: " + ledger.PreferredHostClientId);
         }
 
-        Console.WriteLine("Start/restart the game with COTLOnline.Diagnostics 0.5.35+ loaded for server-save authority, scoped bridge body guards, host enemy authority diagnostics, guarded spell-cast relay, encounter diagnostics, loadout de-dupe, frame-state relay, seed-wait, pinned-host remote P2, remote-away, and cult-state diagnostics.");
+        Console.WriteLine("Start/restart the game with COTLOnline.Diagnostics 0.5.36+ loaded for host follower authority, server-save authority, scoped bridge body guards, host enemy authority diagnostics, guarded spell-cast relay, encounter diagnostics, loadout de-dupe, frame-state relay, seed-wait, pinned-host remote P2, remote-away, and cult-state diagnostics.");
         Console.WriteLine("Press Ctrl+C to stop.");
 
         while (!cancellationToken.IsCancellationRequested)
@@ -359,6 +359,13 @@ internal static partial class Program
             SendServerPacket(udpClient, remoteEndPoint, "server.enemy_authority", BuildEnemyAuthorityMessage(ledger, client, traceEvent.Timestamp));
         }
 
+        if (ShouldSendFollowerAuthority(traceEvent.Category)
+            && (client.LastFollowerAuthoritySent == null || traceEvent.Timestamp - client.LastFollowerAuthoritySent >= TimeSpan.FromSeconds(0.25)))
+        {
+            client.LastFollowerAuthoritySent = traceEvent.Timestamp;
+            SendServerPacket(udpClient, remoteEndPoint, "server.follower_authority", BuildFollowerAuthorityMessage(ledger, client, traceEvent.Timestamp));
+        }
+
         if (ShouldSendSaveAuthority(traceEvent.Category))
         {
             SendServerSaveChunksIfNeeded(udpClient, ledger, client, traceEvent.Timestamp, remoteEndPoint);
@@ -421,6 +428,13 @@ internal static partial class Program
             || string.Equals(category, "sync.encounter_island", StringComparison.Ordinal)
             || string.Equals(category, "sync.encounter_chance", StringComparison.Ordinal)
             || string.Equals(category, "sync.player_motion", StringComparison.Ordinal)
+            || string.Equals(category, "live.heartbeat", StringComparison.Ordinal);
+    }
+
+    private static bool ShouldSendFollowerAuthority(string category)
+    {
+        return string.Equals(category, "sync.follower_catalog", StringComparison.Ordinal)
+            || string.Equals(category, "sync.cult_snapshot", StringComparison.Ordinal)
             || string.Equals(category, "live.heartbeat", StringComparison.Ordinal);
     }
 
@@ -891,6 +905,76 @@ internal static partial class Program
             + " preview=" + PacketValue(host.CombatPreview);
     }
 
+    private static string BuildFollowerAuthorityMessage(LedgerState ledger, ClientLedger recipient, DateTimeOffset now)
+    {
+        LedgerReducer.AssignClientRoles(ledger, now);
+
+        ClientLedger? host = ledger.Clients.Values.FirstOrDefault(candidate =>
+            (candidate.HostPlayerSlot == 0 || string.Equals(candidate.ServerRole, "host-lamb", StringComparison.Ordinal))
+            && candidate.FollowerCatalog.Count > 0);
+        if (host == null)
+        {
+            return "serverTime=" + now.ToUnixTimeMilliseconds()
+                + " target=" + PacketValue(recipient.ClientId)
+                + " worldId=" + PacketValue(ledger.ServerWorld?.WorldId ?? "none")
+                + " host=unknown"
+                + " mode=waiting"
+                + " hash=unknown"
+                + " targetHash=" + PacketValue(recipient.FollowerCatalogHash)
+                + " targetMatch=unknown"
+                + " count=0"
+                + " active=0"
+                + " ageMs=unknown"
+                + " followers=none";
+        }
+
+        long ageMs = host.FollowerCatalogUpdatedAt == null
+            ? -1
+            : (long)Math.Max(0, (now - host.FollowerCatalogUpdatedAt.Value).TotalMilliseconds);
+        bool? targetMatch = string.IsNullOrWhiteSpace(recipient.FollowerCatalogHash) || string.IsNullOrWhiteSpace(host.FollowerCatalogHash)
+            ? null
+            : string.Equals(recipient.FollowerCatalogHash, host.FollowerCatalogHash, StringComparison.Ordinal);
+
+        StringBuilder followers = new();
+        int count = 0;
+        foreach (FollowerStateLedger follower in host.FollowerCatalog.Values.OrderBy(follower => follower.Id))
+        {
+            if (count > 0)
+            {
+                followers.Append(";");
+            }
+
+            followers.Append(follower.Id)
+                .Append("|name=").Append(PacketValue(follower.Name))
+                .Append("|loc=").Append(PacketValue(follower.Location))
+                .Append("|home=").Append(PacketValue(follower.HomeLocation))
+                .Append("|task=").Append(PacketValue(follower.Task))
+                .Append("|state=").Append(PacketValue(follower.State))
+                .Append("|pos=").Append(PacketValue(follower.Position))
+                .Append("|faith=").Append(PacketValue(follower.Faith))
+                .Append("|happy=").Append(PacketValue(follower.Happiness))
+                .Append("|sat=").Append(PacketValue(follower.Satiation))
+                .Append("|age=").Append(PacketValue(follower.Age))
+                .Append("|curse=").Append(PacketValue(follower.CursedState))
+                .Append("|active=").Append(follower.Active?.ToString() ?? "unknown");
+            count++;
+        }
+
+        return "serverTime=" + now.ToUnixTimeMilliseconds()
+            + " target=" + PacketValue(recipient.ClientId)
+            + " worldId=" + PacketValue(ledger.ServerWorld?.WorldId ?? "none")
+            + " host=" + PacketValue(host.ClientId)
+            + " role=" + PacketValue(host.ServerRole)
+            + " mode=host-follower-authority"
+            + " hash=" + PacketValue(host.FollowerCatalogHash)
+            + " targetHash=" + PacketValue(recipient.FollowerCatalogHash)
+            + " targetMatch=" + (targetMatch?.ToString() ?? "unknown")
+            + " count=" + count
+            + " active=" + (host.FollowerCatalogActive?.ToString() ?? "unknown")
+            + " ageMs=" + (ageMs < 0 ? "unknown" : ageMs.ToString(CultureInfo.InvariantCulture))
+            + " followers=" + (count == 0 ? "none" : followers.ToString());
+    }
+
     private static string BuildSaveChunkMessage(ServerSaveSnapshotLedger snapshot, ClientLedger recipient, DateTimeOffset now, int chunkIndex)
     {
         string chunk = chunkIndex >= 0 && chunkIndex < snapshot.Chunks.Count ? snapshot.Chunks[chunkIndex] : "";
@@ -1220,6 +1304,11 @@ internal static partial class LedgerReducer
         if (category == "sync.cult_snapshot")
         {
             return ApplyCultSnapshot(ledger, traceEvent, message);
+        }
+
+        if (category == "sync.follower_catalog")
+        {
+            return ApplyFollowerCatalog(ledger, traceEvent, message);
         }
 
         if (category == "sync.world_hash")
@@ -1916,6 +2005,200 @@ internal static partial class LedgerReducer
             + " active=" + (client.CultActiveFollowersCount?.ToString() ?? "unknown")
             + " faith=" + (client.CultFaith ?? "unknown")
             + " preview=" + (client.CultPreview ?? "unknown"));
+    }
+
+    private static LedgerEvent? ApplyFollowerCatalog(LedgerState ledger, TraceEvent traceEvent, string message)
+    {
+        string clientId = ReadClientId(message);
+        string sessionId = ReadSessionId(message);
+        string? catalogHash = ReadToken(message, "hash");
+        if (string.IsNullOrWhiteSpace(catalogHash))
+        {
+            return null;
+        }
+
+        if (!ledger.Clients.TryGetValue(clientId, out ClientLedger? client))
+        {
+            client = new ClientLedger(clientId)
+            {
+                FirstSeen = traceEvent.Timestamp,
+                JoinOrder = ++ledger.NextClientJoinOrder
+            };
+            ledger.Clients[clientId] = client;
+        }
+
+        Dictionary<int, FollowerStateLedger> followers = ParseFollowerCatalog(message);
+        client.SessionId = sessionId;
+        client.Scene = ReadToken(message, "scene") ?? client.Scene;
+        client.Location = ReadToken(message, "location") ?? client.Location;
+        client.SaveSlot = ReadIntToken(message, "saveSlot") ?? client.SaveSlot;
+        client.FollowerCatalogHash = catalogHash;
+        client.FollowerCatalogCount = ReadIntToken(message, "followers") ?? followers.Count;
+        client.FollowerCatalogActive = ReadIntToken(message, "activeFollowers") ?? client.FollowerCatalogActive;
+        client.FollowerCatalogUpdatedAt = traceEvent.Timestamp;
+        client.FollowerCatalog = followers;
+        client.LastSeen = traceEvent.Timestamp;
+        client.LastCategory = "sync.follower_catalog";
+
+        AssignClientRoles(ledger, traceEvent.Timestamp);
+        ClientLedger? host = ledger.Clients.Values.FirstOrDefault(candidate => IsAssignedHostClient(candidate));
+        bool? match = null;
+        if (host != null && !string.IsNullOrWhiteSpace(host.FollowerCatalogHash))
+        {
+            match = string.Equals(client.FollowerCatalogHash, host.FollowerCatalogHash, StringComparison.Ordinal);
+        }
+
+        string signature = client.FollowerCatalogHash
+            + "|" + (client.FollowerCatalogCount?.ToString() ?? "unknown")
+            + "|" + (client.FollowerCatalogActive?.ToString() ?? "unknown")
+            + "|" + (match?.ToString() ?? "unknown");
+        if (string.Equals(client.LastFollowerCatalogSignature, signature, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        client.LastFollowerCatalogSignature = signature;
+        return new LedgerEvent(
+            traceEvent.Timestamp,
+            "followers",
+            client.ClientId
+            + " role=" + (client.ServerRole ?? "unknown")
+            + " hash=" + (client.FollowerCatalogHash ?? "unknown")
+            + " match=" + (match?.ToString() ?? "unknown")
+            + " count=" + (client.FollowerCatalogCount?.ToString() ?? "unknown")
+            + " active=" + (client.FollowerCatalogActive?.ToString() ?? "unknown")
+            + " preview=" + BuildFollowerPreview(client.FollowerCatalog, 6));
+    }
+
+    private static Dictionary<int, FollowerStateLedger> ParseFollowerCatalog(string message)
+    {
+        Dictionary<int, FollowerStateLedger> followers = [];
+        string? payload = ReadToken(message, "catalog");
+        if (string.IsNullOrWhiteSpace(payload) || string.Equals(payload, "none", StringComparison.OrdinalIgnoreCase))
+        {
+            return followers;
+        }
+
+        string[] entries = payload.Split(';', StringSplitOptions.RemoveEmptyEntries);
+        foreach (string entry in entries)
+        {
+            FollowerStateLedger? follower = ParseFollowerEntry(entry);
+            if (follower != null)
+            {
+                followers[follower.Id] = follower;
+            }
+        }
+
+        return followers;
+    }
+
+    private static FollowerStateLedger? ParseFollowerEntry(string entry)
+    {
+        if (string.IsNullOrWhiteSpace(entry))
+        {
+            return null;
+        }
+
+        string[] parts = entry.Split('|', StringSplitOptions.None);
+        if (parts.Length == 0 || !int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out int id))
+        {
+            return null;
+        }
+
+        FollowerStateLedger follower = new()
+        {
+            Id = id
+        };
+
+        for (int i = 1; i < parts.Length; i++)
+        {
+            int equals = parts[i].IndexOf('=');
+            if (equals <= 0 || equals >= parts[i].Length - 1)
+            {
+                continue;
+            }
+
+            string key = parts[i][..equals];
+            string value = parts[i][(equals + 1)..];
+            switch (key)
+            {
+                case "name":
+                    follower.Name = value;
+                    break;
+                case "loc":
+                    follower.Location = value;
+                    break;
+                case "home":
+                    follower.HomeLocation = value;
+                    break;
+                case "task":
+                    follower.Task = value;
+                    break;
+                case "state":
+                    follower.State = value;
+                    break;
+                case "pos":
+                    follower.Position = value;
+                    break;
+                case "faith":
+                    follower.Faith = value;
+                    break;
+                case "happy":
+                    follower.Happiness = value;
+                    break;
+                case "sat":
+                    follower.Satiation = value;
+                    break;
+                case "age":
+                    follower.Age = value;
+                    break;
+                case "curse":
+                    follower.CursedState = value;
+                    break;
+                case "active":
+                    if (bool.TryParse(value, out bool active))
+                    {
+                        follower.Active = active;
+                    }
+                    break;
+            }
+        }
+
+        return follower;
+    }
+
+    private static string BuildFollowerPreview(Dictionary<int, FollowerStateLedger> followers, int limit)
+    {
+        if (followers.Count == 0)
+        {
+            return "none";
+        }
+
+        StringBuilder sb = new();
+        int count = 0;
+        foreach (FollowerStateLedger follower in followers.Values.OrderBy(follower => follower.Id))
+        {
+            if (count > 0)
+            {
+                sb.Append(",");
+            }
+
+            sb.Append(follower.Id)
+                .Append(":").Append(follower.Task ?? "unknown")
+                .Append("@").Append(follower.Position ?? "unknown");
+            count++;
+            if (count >= limit)
+            {
+                break;
+            }
+        }
+
+        if (followers.Count > count)
+        {
+            sb.Append(",+").Append(followers.Count - count);
+        }
+
+        return sb.ToString();
     }
 
     private static void UpdateHostCultBaseline(LedgerState ledger, ClientLedger client, DateTimeOffset timestamp)
@@ -2987,6 +3270,7 @@ internal sealed class ClientLedger(string clientId)
     public DateTimeOffset? LastRewardClaimsSent { get; set; }
     public DateTimeOffset? LastSpellCastsSent { get; set; }
     public DateTimeOffset? LastEnemyAuthoritySent { get; set; }
+    public DateTimeOffset? LastFollowerAuthoritySent { get; set; }
     public string? LastSaveSnapshotSent { get; set; }
     public DateTimeOffset? LastSaveSnapshotSentAt { get; set; }
     public string? LastSaveSnapshotAck { get; set; }
@@ -3004,6 +3288,14 @@ internal sealed class ClientLedger(string clientId)
     public string? CultPreview { get; set; }
     [JsonIgnore]
     public string LastCultSignature { get; set; } = "";
+    public string? FollowerCatalogHash { get; set; }
+    public int? FollowerCatalogCount { get; set; }
+    public int? FollowerCatalogActive { get; set; }
+    public DateTimeOffset? FollowerCatalogUpdatedAt { get; set; }
+    [JsonIgnore]
+    public Dictionary<int, FollowerStateLedger> FollowerCatalog { get; set; } = [];
+    [JsonIgnore]
+    public string LastFollowerCatalogSignature { get; set; } = "";
     public string? CombatHash { get; set; }
     public bool? CombatMatch { get; set; }
     public int? CombatCount { get; set; }
@@ -3037,6 +3329,8 @@ internal sealed class ClientLedger(string clientId)
             + " cultHash=" + (CultSnapshotHash ?? "unknown")
             + " cultMatch=" + (CultSnapshotMatch?.ToString() ?? "unknown")
             + " cultFollowers=" + (CultFollowersCount?.ToString() ?? "unknown")
+            + " followerHash=" + (FollowerCatalogHash ?? "unknown")
+            + " followerCount=" + (FollowerCatalogCount?.ToString() ?? "unknown")
             + " combatHash=" + (CombatHash ?? "unknown")
             + " combatMatch=" + (CombatMatch?.ToString() ?? "unknown")
             + " saveAck=" + (LastSaveSnapshotAck ?? "unknown")
@@ -3141,6 +3435,23 @@ internal sealed class ServerWorldClientLedger
     public string? CombatRounds { get; set; }
     public string? CombatPreview { get; set; }
     public DateTimeOffset LastSeen { get; set; }
+}
+
+internal sealed class FollowerStateLedger
+{
+    public int Id { get; set; }
+    public string? Name { get; set; }
+    public string? Location { get; set; }
+    public string? HomeLocation { get; set; }
+    public string? Task { get; set; }
+    public string? State { get; set; }
+    public string? Position { get; set; }
+    public string? Faith { get; set; }
+    public string? Happiness { get; set; }
+    public string? Satiation { get; set; }
+    public string? Age { get; set; }
+    public string? CursedState { get; set; }
+    public bool? Active { get; set; }
 }
 
 internal sealed class SaveChunkAssemblyLedger(string snapshotId, int chunkCount)

@@ -13,7 +13,7 @@ namespace COTLOnline.Diagnostics
     {
         public const string PluginGuid = "com.codex.cotlonline.diagnostics";
         public const string PluginName = "COTL Online Diagnostics";
-        public const string PluginVersion = "0.5.35";
+        public const string PluginVersion = "0.5.36";
 
         private Harmony _harmony;
         private ConfigEntry<bool> _verboseSnapshots;
@@ -65,6 +65,8 @@ namespace COTLOnline.Diagnostics
         private ConfigEntry<bool> _phase15CaptureHostSaveSnapshots;
         private ConfigEntry<bool> _phase15ApplyServerSaveSnapshots;
         private ConfigEntry<bool> _phase15BlockRemoteClientSaves;
+        private ConfigEntry<bool> _phase16FollowerAuthority;
+        private ConfigEntry<bool> _phase16ApplyHostFollowerPositions;
         private ConfigEntry<string> _clientId;
         private ConfigEntry<string> _liveUdpHost;
         private ConfigEntry<int> _liveUdpPort;
@@ -87,6 +89,10 @@ namespace COTLOnline.Diagnostics
         private ConfigEntry<float> _phase10ServerSeedWaitTimeoutSeconds;
         private ConfigEntry<float> _phase13CombatRosterIntervalSeconds;
         private ConfigEntry<float> _phase15HostSaveSnapshotIntervalSeconds;
+        private ConfigEntry<float> _phase16FollowerCatalogIntervalSeconds;
+        private ConfigEntry<float> _phase16FollowerAuthorityMaxAgeMs;
+        private ConfigEntry<float> _phase16FollowerSnapDistance;
+        private ConfigEntry<float> _phase16FollowerCorrectionSpeed;
         private ConfigEntry<float> _runtimeSnapshotInterval;
         private ConfigEntry<float> _persistentSnapshotInterval;
         private ConfigEntry<float> _saveFileHashInterval;
@@ -496,6 +502,42 @@ namespace COTLOnline.Diagnostics
                 30.0f,
                 "How often the host sends a save snapshot if the active save files changed. SaveAndLoad.Save also triggers an immediate snapshot.");
 
+            _phase16FollowerAuthority = Config.Bind(
+                "Phase16",
+                "FollowerAuthority",
+                true,
+                "When enabled, emits and receives host-authored follower catalog packets keyed by stable FollowerInfo.ID.");
+
+            _phase16ApplyHostFollowerPositions = Config.Bind(
+                "Phase16",
+                "ApplyHostFollowerPositions",
+                true,
+                "When enabled on non-host clients, gently moves local followers toward host-authored positions by FollowerInfo.ID. This is visual/position authority only; jobs/interactions still need command sync.");
+
+            _phase16FollowerCatalogIntervalSeconds = Config.Bind(
+                "Phase16",
+                "FollowerCatalogIntervalSeconds",
+                0.75f,
+                "How often to emit sync.follower_catalog while in cult/base scenes.");
+
+            _phase16FollowerAuthorityMaxAgeMs = Config.Bind(
+                "Phase16",
+                "FollowerAuthorityMaxAgeMs",
+                2500.0f,
+                "Maximum age in milliseconds for host follower authority packets before remote clients stop applying them.");
+
+            _phase16FollowerSnapDistance = Config.Bind(
+                "Phase16",
+                "FollowerSnapDistance",
+                5.0f,
+                "Distance in Unity units before a remote follower body snaps to the host position instead of smoothing.");
+
+            _phase16FollowerCorrectionSpeed = Config.Bind(
+                "Phase16",
+                "FollowerCorrectionSpeed",
+                12.0f,
+                "How quickly remote follower bodies move toward host positions when under the snap threshold.");
+
             _clientId = Config.Bind(
                 "Live",
                 "ClientId",
@@ -608,8 +650,17 @@ namespace COTLOnline.Diagnostics
             Logger.LogInfo("Diagnostics startup checkpoint: phase 7 remote host visual mirror configured.");
             BridgeWorldAuthority.Configure(
                 _phase8WorldAuthorityDiagnostics.Value,
-                _phase8CultSnapshotIntervalSeconds.Value);
-            Logger.LogInfo("Diagnostics startup checkpoint: phase 8 world authority diagnostics configured.");
+                _phase8CultSnapshotIntervalSeconds.Value,
+                _phase16FollowerAuthority.Value,
+                _phase16FollowerCatalogIntervalSeconds.Value);
+            Logger.LogInfo("Diagnostics startup checkpoint: phase 8/16 world and follower authority diagnostics configured.");
+            BridgeFollowerAuthority.Configure(
+                _phase16FollowerAuthority.Value,
+                _phase16ApplyHostFollowerPositions.Value,
+                _phase16FollowerAuthorityMaxAgeMs.Value,
+                _phase16FollowerSnapDistance.Value,
+                _phase16FollowerCorrectionSpeed.Value);
+            Logger.LogInfo("Diagnostics startup checkpoint: phase 16 follower authority configured.");
             BridgeLoadoutAuthority.Configure(
                 _phase9LoadoutRelay.Value,
                 _phase9LoadoutOverrideRemoteBodies.Value);
@@ -681,6 +732,7 @@ namespace COTLOnline.Diagnostics
             BridgePerfProfiler.Measure("BridgeRemoteHostMirror", BridgeRemoteHostMirror.Tick);
             BridgePerfProfiler.Measure("BridgeSpellAuthority", BridgeSpellAuthority.Tick);
             BridgePerfProfiler.Measure("BridgeWorldAuthority", BridgeWorldAuthority.Tick);
+            BridgePerfProfiler.Measure("BridgeFollowerAuthority", BridgeFollowerAuthority.Tick);
             BridgePerfProfiler.Measure("BridgeLoadoutAuthority", BridgeLoadoutAuthority.Tick);
             BridgePerfProfiler.Measure("BridgeRewardClaimAuthority", BridgeRewardClaimAuthority.Tick);
             BridgePerfProfiler.Measure("BridgeCombatAuthority", BridgeCombatAuthority.Tick);

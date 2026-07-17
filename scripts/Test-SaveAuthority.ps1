@@ -88,8 +88,8 @@ try {
     $hostClient.Connect('127.0.0.1', $Port)
     $remoteClient.Connect('127.0.0.1', $Port)
 
-    Send-TraceEvent $hostClient 'live.heartbeat' 'clientId=client-save-host sessionId=host-session pluginVersion=0.5.35 scene=Base location=Base coop=True players=1'
-    Send-TraceEvent $remoteClient 'live.heartbeat' 'clientId=client-save-remote sessionId=remote-session pluginVersion=0.5.35 scene=Base location=Base coop=True players=1'
+    Send-TraceEvent $hostClient 'live.heartbeat' 'clientId=client-save-host sessionId=host-session pluginVersion=0.5.36 scene=Base location=Base coop=True players=1'
+    Send-TraceEvent $remoteClient 'live.heartbeat' 'clientId=client-save-remote sessionId=remote-session pluginVersion=0.5.36 scene=Base location=Base coop=True players=1'
     [void](Receive-Category $hostClient 'server.roster' 1200)
     [void](Receive-Category $remoteClient 'server.roster' 1200)
 
@@ -108,7 +108,7 @@ try {
 
     $savePacket = $null
     for ($attempt = 0; $attempt -lt 12 -and $null -eq $savePacket; $attempt++) {
-        Send-TraceEvent $remoteClient 'live.heartbeat' "clientId=client-save-remote sessionId=remote-session pluginVersion=0.5.35 scene=Base location=Base seq=$attempt"
+        Send-TraceEvent $remoteClient 'live.heartbeat' "clientId=client-save-remote sessionId=remote-session pluginVersion=0.5.36 scene=Base location=Base seq=$attempt"
         $candidate = Receive-Category $remoteClient 'server.save_chunk' 500
         if ($null -ne $candidate `
             -and $candidate.message -match "snapshot=$snapshot" `

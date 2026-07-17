@@ -39,6 +39,7 @@ namespace COTLOnline.Diagnostics
                 BridgeSpellAuthority.Reset();
                 BridgeEnemyAuthority.Reset();
                 BridgeSaveAuthority.Reset();
+                BridgeFollowerAuthority.Reset();
                 WorldTrace.Record("live.config", "udp=False");
                 return;
             }
@@ -54,6 +55,7 @@ namespace COTLOnline.Diagnostics
                 BridgeSpellAuthority.Reset();
                 BridgeEnemyAuthority.Reset();
                 BridgeSaveAuthority.Reset();
+                BridgeFollowerAuthority.Reset();
                 IPAddress address = IPAddress.Parse(host);
                 _endpoint = new IPEndPoint(address, port);
                 _client = new UdpClient();
@@ -141,6 +143,7 @@ namespace COTLOnline.Diagnostics
             BridgeSpellAuthority.Reset();
             BridgeEnemyAuthority.Reset();
             BridgeSaveAuthority.Reset();
+            BridgeFollowerAuthority.Reset();
             while (Queue.TryDequeue(out _))
             {
             }
@@ -268,6 +271,13 @@ namespace COTLOnline.Diagnostics
                 return;
             }
 
+            if (category == "server.follower_authority")
+            {
+                BridgeFollowerAuthority.UpdateFromPacket(source, message);
+                WorldTrace.Record("bridge.follower_authority", "from=" + source + " " + message);
+                return;
+            }
+
             if (category == "server.save_chunk")
             {
                 BridgeSaveAuthority.UpdateFromPacket(source, message);
@@ -362,6 +372,7 @@ namespace COTLOnline.Diagnostics
                 || category.StartsWith("phase10.", StringComparison.Ordinal)
                 || category.StartsWith("phase11.", StringComparison.Ordinal)
                 || category.StartsWith("phase15.", StringComparison.Ordinal)
+                || category.StartsWith("phase16.", StringComparison.Ordinal)
                 || category.StartsWith("perf.", StringComparison.Ordinal)
                 || category.StartsWith("scene.", StringComparison.Ordinal)
                 || category.StartsWith("save.", StringComparison.Ordinal)

@@ -5,7 +5,7 @@ This document explains how to use the latest packaged test build from this repos
 Current package:
 
 ```text
-releases/COTLOnline-0.5.35-save-authority-alpha.zip
+releases/COTLOnline-0.5.36-follower-authority-alpha.zip
 ```
 
 ## What Is Inside
@@ -16,6 +16,7 @@ releases/COTLOnline-0.5.35-save-authority-alpha.zip
 - `docs/EXTERNAL_COTLMP_REVIEW.md` - notes on which external COTLMP fork ideas are useful and which are intentionally not copied wholesale.
 - `scripts/Test-SpellRelay.ps1` - local smoke test for the spell relay packet path.
 - `scripts/Test-SaveAuthority.ps1` - local smoke test for the server-save chunk/ACK packet path.
+- `scripts/Test-FollowerAuthority.ps1` - local smoke test for the host follower catalog relay path.
 
 The package does not include Cult of the Lamb game assemblies, BepInEx itself, saves, server worlds, generated traces, or private local configuration.
 
@@ -90,6 +91,25 @@ dotnet run --project ".\src\COTLOnline.ServerLedger\COTLOnline.ServerLedger.cspr
 - Confirm the overlay/server roster shows two clients:
   - one `role=host-lamb`
   - one `role=remote-p2`
+
+## What To Test In 0.5.36
+
+This build adds the first host-authoritative follower layer:
+
+- each client emits `sync.follower_catalog` keyed by stable `FollowerInfo.ID`
+- ServerLedger stores catalogs per client and relays the assigned host-lamb catalog as `server.follower_authority`
+- non-host clients can move local follower bodies toward host positions with `FollowerManager.FindFollowerByID(id)`
+- overlay shows `follower authority: host=... count=... match=... found=... moved=...`
+
+Clean test:
+
+- keep both clients in the same cult/base scene, not a dungeon
+- start server with `--listen-udp --server-save-slot 4 --host-client-id <host-client-id>`
+- watch server console for `[followers]` lines from both clients
+- watch laptop overlay for `follower authority` with `count`, `found`, and `moved`
+- compare whether followers slowly converge to the host's positions instead of wandering independently
+
+This is not interaction/job authority yet. If remote P2 blesses a follower, assigns work, triggers a quest, places a building, or collects resources, that still needs a later command path.
 
 ## What To Test In 0.5.35
 

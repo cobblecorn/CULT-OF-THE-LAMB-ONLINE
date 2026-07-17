@@ -1,12 +1,12 @@
 param(
-    [int]$Port = 38631
+    [int]$Port = 38633
 )
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $serverProject = Join-Path $root 'src\COTLOnline.ServerLedger\COTLOnline.ServerLedger.csproj'
 $serverDll = Join-Path $root 'src\COTLOnline.ServerLedger\bin\Release\net10.0\COTLOnline.ServerLedger.dll'
-$artifactRoot = Join-Path $root 'artifacts\spell-relay-smoke'
+$artifactRoot = Join-Path $root 'artifacts\follower-authority-smoke'
 $worlds = Join-Path $artifactRoot 'worlds'
 $stdout = Join-Path $artifactRoot 'server.out.log'
 $stderr = Join-Path $artifactRoot 'server.err.log'
@@ -19,18 +19,22 @@ if (-not (Test-Path -LiteralPath $serverDll)) {
     }
 }
 
+Remove-Item -LiteralPath $stdout, $stderr -Force -ErrorAction SilentlyContinue
+
 $arguments = @(
     ('"' + $serverDll + '"'),
     '--listen-udp',
     '--udp-port', $Port,
-    '--host-client-id', 'client-sol-host',
-    '--worlds-dir', ('"' + $worlds + '"')
+    '--host-client-id', 'client-follow-host',
+    '--worlds-dir', ('"' + $worlds + '"'),
+    '--server-save-slot', '4'
 )
 
 $server = Start-Process -FilePath 'dotnet.exe' -ArgumentList $arguments -WindowStyle Hidden -PassThru `
     -RedirectStandardOutput $stdout -RedirectStandardError $stderr
 $hostClient = $null
 $remoteClient = $null
+$result = $null
 
 function Send-TraceEvent {
     param(
@@ -84,54 +88,39 @@ try {
     $hostClient.Connect('127.0.0.1', $Port)
     $remoteClient.Connect('127.0.0.1', $Port)
 
-    Send-TraceEvent $hostClient 'live.heartbeat' 'clientId=client-sol-host sessionId=host-session pluginVersion=0.5.36 scene=Dungeon2 location=Dungeon1_2 room=Room_A'
-    Send-TraceEvent $remoteClient 'live.heartbeat' 'clientId=client-sol-remote sessionId=remote-session pluginVersion=0.5.36 scene=Dungeon2 location=Dungeon1_2 room=Room_A'
+    Send-TraceEvent $hostClient 'live.heartbeat' 'clientId=client-follow-host sessionId=host-session pluginVersion=0.5.36 scene=Base_Biome_1 location=Base coop=True players=1'
+    Send-TraceEvent $remoteClient 'live.heartbeat' 'clientId=client-follow-remote sessionId=remote-session pluginVersion=0.5.36 scene=Base_Biome_1 location=Base coop=True players=1'
     [void](Receive-Category $hostClient 'server.roster' 1200)
     [void](Receive-Category $remoteClient 'server.roster' 1200)
 
-    Send-TraceEvent $hostClient 'sync.spell_cast' 'clientId=client-sol-host sessionId=host-session seq=7 playerID=0 curse=Fireball curseLevel=4 autoAim=False damageMultiplier=1 facingAngle=90 lookAngle=90 aimAngle=90 targetOffset=(0,5,0) pos=(1,2,0) scene=Dungeon2 location=Dungeon1_2 room=Room_A'
+    $hostCatalog = '1|name=Amdusias|loc=Base|home=Base|task=Worship|state=Walking|pos=(1.25,2.5,0)|faith=10|happy=9|sat=8|age=30|curse=None|active=True;7|name=Barbatos|loc=Base|home=Base|task=Farm|state=Working|pos=(-3,4.5,0)|faith=7|happy=6|sat=5|age=44|curse=None|active=True'
+    $remoteCatalog = '1|name=Amdusias|loc=Base|home=Base|task=None|state=Idle|pos=(99,99,0)|faith=10|happy=9|sat=8|age=30|curse=None|active=True'
+    Send-TraceEvent $hostClient 'sync.follower_catalog' "clientId=client-follow-host sessionId=host-session seq=1 scene=Base_Biome_1 location=Base role=host-lamb worldId=smoke saveSlot=4 hash=hosthash followers=2 dataFollowers=2 activeFollowers=2 structures=1 cultFaith=10 day=1 catalog=$hostCatalog"
+    Send-TraceEvent $remoteClient 'sync.follower_catalog' "clientId=client-follow-remote sessionId=remote-session seq=1 scene=Base_Biome_1 location=Base role=remote-p2 worldId=smoke saveSlot=4 hash=remotehash followers=1 dataFollowers=1 activeFollowers=1 structures=1 cultFaith=10 day=1 catalog=$remoteCatalog"
 
-    $spellPacket = $null
-    for ($attempt = 0; $attempt -lt 12 -and $null -eq $spellPacket; $attempt++) {
-        Send-TraceEvent $remoteClient 'sync.player_input' "clientId=client-sol-remote sessionId=remote-session seq=$($attempt + 9) playerID=0 ax=0 ay=0 scene=Dungeon2 location=Dungeon1_2 room=Room_A"
-        $candidate = Receive-Category $remoteClient 'server.spell_casts' 400
+    $authorityPacket = $null
+    for ($attempt = 0; $attempt -lt 12 -and $null -eq $authorityPacket; $attempt++) {
+        Send-TraceEvent $remoteClient 'live.heartbeat' "clientId=client-follow-remote sessionId=remote-session pluginVersion=0.5.36 scene=Base_Biome_1 location=Base seq=$attempt"
+        $candidate = Receive-Category $remoteClient 'server.follower_authority' 500
         if ($null -ne $candidate `
-            -and $candidate.message -match 'castCount=1' `
-            -and $candidate.message -match 'source=client-sol-host' `
-            -and $candidate.message -match 'seq=7' `
-            -and $candidate.message -match 'curse=Fireball') {
-            $spellPacket = $candidate
+            -and $candidate.message -match 'host=client-follow-host' `
+            -and $candidate.message -match 'hash=hosthash' `
+            -and $candidate.message -match 'targetHash=remotehash' `
+            -and $candidate.message -match 'targetMatch=False' `
+            -and $candidate.message -match 'followers=1\|name=Amdusias' `
+            -and $candidate.message -match '7\|name=Barbatos') {
+            $authorityPacket = $candidate
         }
         Start-Sleep -Milliseconds 60
     }
-    if ($null -eq $spellPacket) {
-        throw 'Remote client did not receive the expected host Fireball cast through server.spell_casts.'
+
+    if ($null -eq $authorityPacket) {
+        throw 'Remote client did not receive the expected server.follower_authority host catalog.'
     }
 
-    Send-TraceEvent $remoteClient 'sync.spell_cast' 'clientId=client-sol-remote sessionId=remote-session seq=11 playerID=0 curse=MegaSlash curseLevel=3 autoAim=False damageMultiplier=1 facingAngle=180 lookAngle=180 aimAngle=180 targetOffset=(-4,0,0) pos=(3,2,0) scene=Dungeon2 location=Dungeon1_2 room=Room_A'
-
-    $returnPacket = $null
-    for ($attempt = 0; $attempt -lt 12 -and $null -eq $returnPacket; $attempt++) {
-        Send-TraceEvent $hostClient 'sync.player_input' "clientId=client-sol-host sessionId=host-session seq=$($attempt + 30) playerID=0 ax=0 ay=0 scene=Dungeon2 location=Dungeon1_2 room=Room_A"
-        $candidate = Receive-Category $hostClient 'server.spell_casts' 400
-        if ($null -ne $candidate `
-            -and $candidate.message -match 'castCount=1' `
-            -and $candidate.message -match 'source=client-sol-remote' `
-            -and $candidate.message -match 'role=remote-p2' `
-            -and $candidate.message -match 'seq=11' `
-            -and $candidate.message -match 'curse=MegaSlash') {
-            $returnPacket = $candidate
-        }
-        Start-Sleep -Milliseconds 60
-    }
-    if ($null -eq $returnPacket) {
-        throw 'Host client did not receive the expected remote P2 MegaSlash cast through server.spell_casts.'
-    }
-
-    [PSCustomObject]@{
+    $result = [PSCustomObject]@{
         Result = 'PASS'
-        HostToRemote = $spellPacket.message
-        RemoteToHost = $returnPacket.message
+        RelayMessage = $authorityPacket.message
     }
 }
 finally {
@@ -141,4 +130,8 @@ finally {
         Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
         [void]$server.WaitForExit(2000)
     }
+}
+
+if ($null -ne $result) {
+    $result
 }
