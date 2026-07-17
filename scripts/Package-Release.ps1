@@ -36,6 +36,7 @@ Copy-Item -LiteralPath (Join-Path $root "docs\SOL_AUTHORITY_AUDIT.md") -Destinat
 Copy-Item -LiteralPath (Join-Path $root "docs\EXTERNAL_COTLMP_REVIEW.md") -Destination (Join-Path $stage "docs\EXTERNAL_COTLMP_REVIEW.md")
 
 Copy-Item -LiteralPath (Join-Path $root "scripts\Test-SpellRelay.ps1") -Destination (Join-Path $stage "scripts\Test-SpellRelay.ps1")
+Copy-Item -LiteralPath (Join-Path $root "scripts\Test-SaveAuthority.ps1") -Destination (Join-Path $stage "scripts\Test-SaveAuthority.ps1")
 
 if (Test-Path -LiteralPath $zip) {
     Remove-Item -LiteralPath $zip -Force

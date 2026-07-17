@@ -5,7 +5,7 @@ This document explains how to use the latest packaged test build from this repos
 Current package:
 
 ```text
-releases/COTLOnline-0.5.34-bridge-body-guards.zip
+releases/COTLOnline-0.5.35-save-authority-alpha.zip
 ```
 
 ## What Is Inside
@@ -15,6 +15,7 @@ releases/COTLOnline-0.5.34-bridge-body-guards.zip
 - `docs/` - setup notes, current findings, project status, and SOL authority audit.
 - `docs/EXTERNAL_COTLMP_REVIEW.md` - notes on which external COTLMP fork ideas are useful and which are intentionally not copied wholesale.
 - `scripts/Test-SpellRelay.ps1` - local smoke test for the spell relay packet path.
+- `scripts/Test-SaveAuthority.ps1` - local smoke test for the server-save chunk/ACK packet path.
 
 The package does not include Cult of the Lamb game assemblies, BepInEx itself, saves, server worlds, generated traces, or private local configuration.
 
@@ -89,6 +90,25 @@ dotnet run --project ".\src\COTLOnline.ServerLedger\COTLOnline.ServerLedger.cspr
 - Confirm the overlay/server roster shows two clients:
   - one `role=host-lamb`
   - one `role=remote-p2`
+
+## What To Test In 0.5.35
+
+This build adds the first server-save authority pass inspired by the useful external COTLMP fork findings, but kept inside our bridge protocol:
+
+- host captures raw save slot `4` files, bundles/compresses them, and streams chunks to ServerLedger
+- ServerLedger stores the latest compressed snapshot under `server_worlds/<worldId>/save`
+- non-host clients receive `server.save_chunk`, verify the bundle hash, and apply files into their configured online slot
+- non-host save writes are blocked while connected as `remote-p2` or `pending`
+
+Clean test:
+
+- start server with `--listen-udp --server-save-slot 4 --host-client-id <host-client-id>`
+- start host first, then laptop
+- wait for overlay line `save authority: role=host-lamb ... last=<hash>` on host
+- wait for laptop overlay line showing `pending=<snapshot>` then `applied=<snapshot>`
+- check the server console for `[save] server snapshot ready ...` and `[save] ack ... status=applied`
+
+This does not solve live world mutations by itself. Placing buildings, follower jobs, structure inventory, enemy events, and dungeon room events can still diverge until they are converted into ordered host/server commands.
 
 ## What To Test In 0.5.34
 

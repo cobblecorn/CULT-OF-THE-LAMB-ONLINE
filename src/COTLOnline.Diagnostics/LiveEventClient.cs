@@ -38,6 +38,7 @@ namespace COTLOnline.Diagnostics
                 BridgeRewardClaimAuthority.Reset();
                 BridgeSpellAuthority.Reset();
                 BridgeEnemyAuthority.Reset();
+                BridgeSaveAuthority.Reset();
                 WorldTrace.Record("live.config", "udp=False");
                 return;
             }
@@ -52,6 +53,7 @@ namespace COTLOnline.Diagnostics
                 BridgeRewardClaimAuthority.Reset();
                 BridgeSpellAuthority.Reset();
                 BridgeEnemyAuthority.Reset();
+                BridgeSaveAuthority.Reset();
                 IPAddress address = IPAddress.Parse(host);
                 _endpoint = new IPEndPoint(address, port);
                 _client = new UdpClient();
@@ -138,6 +140,7 @@ namespace COTLOnline.Diagnostics
             BridgeRewardClaimAuthority.Reset();
             BridgeSpellAuthority.Reset();
             BridgeEnemyAuthority.Reset();
+            BridgeSaveAuthority.Reset();
             while (Queue.TryDequeue(out _))
             {
             }
@@ -265,6 +268,13 @@ namespace COTLOnline.Diagnostics
                 return;
             }
 
+            if (category == "server.save_chunk")
+            {
+                BridgeSaveAuthority.UpdateFromPacket(source, message);
+                WorldTrace.Record("bridge.save_chunk", "from=" + source + " " + StripLargeData(message));
+                return;
+            }
+
             WorldTrace.Record("bridge.server_packet", "from=" + source + " category=" + category + " payload=" + Clean(payload));
         }
 
@@ -351,13 +361,32 @@ namespace COTLOnline.Diagnostics
                 || category.StartsWith("phase9.", StringComparison.Ordinal)
                 || category.StartsWith("phase10.", StringComparison.Ordinal)
                 || category.StartsWith("phase11.", StringComparison.Ordinal)
+                || category.StartsWith("phase15.", StringComparison.Ordinal)
                 || category.StartsWith("perf.", StringComparison.Ordinal)
                 || category.StartsWith("scene.", StringComparison.Ordinal)
                 || category.StartsWith("save.", StringComparison.Ordinal)
+                || string.Equals(category, "sync.save_chunk", StringComparison.Ordinal)
+                || string.Equals(category, "sync.save_ack", StringComparison.Ordinal)
                 || category.StartsWith("plugin.", StringComparison.Ordinal)
                 || category.StartsWith("bepinex.", StringComparison.Ordinal)
                 || category.StartsWith("live.", StringComparison.Ordinal)
                 || category.StartsWith("coop.", StringComparison.Ordinal);
+        }
+
+        private static string StripLargeData(string message)
+        {
+            if (string.IsNullOrEmpty(message))
+            {
+                return "null";
+            }
+
+            int index = message.IndexOf(" data=", StringComparison.Ordinal);
+            if (index < 0)
+            {
+                return message;
+            }
+
+            return message.Substring(0, index) + " data=<chunk>";
         }
     }
 }

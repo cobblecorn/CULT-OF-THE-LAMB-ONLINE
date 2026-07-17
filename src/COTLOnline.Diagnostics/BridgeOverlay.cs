@@ -62,6 +62,7 @@ namespace COTLOnline.Diagnostics
             GUILayout.Label(BridgeRewardClaimAuthority.OverlayLine(), _dimStyle);
             GUILayout.Label(BridgeCombatAuthority.OverlayLine(), _dimStyle);
             GUILayout.Label(BridgeEnemyAuthority.OverlayLine(), _dimStyle);
+            GUILayout.Label(BridgeSaveAuthority.OverlayLine(), _dimStyle);
             GUILayout.Label(BridgeCameraSplit.OverlayLine(), _dimStyle);
             GUILayout.Label(BridgeRunAuthority.OverlayLine(), _dimStyle);
 

@@ -199,7 +199,7 @@ internal static partial class Program
             Console.WriteLine("Preferred host client: " + ledger.PreferredHostClientId);
         }
 
-        Console.WriteLine("Start/restart the game with COTLOnline.Diagnostics 0.5.34+ loaded for scoped bridge body guards, host enemy authority diagnostics, guarded spell-cast relay, encounter diagnostics, loadout de-dupe, frame-state relay, seed-wait, pinned-host remote P2, remote-away, and cult-state diagnostics.");
+        Console.WriteLine("Start/restart the game with COTLOnline.Diagnostics 0.5.35+ loaded for server-save authority, scoped bridge body guards, host enemy authority diagnostics, guarded spell-cast relay, encounter diagnostics, loadout de-dupe, frame-state relay, seed-wait, pinned-host remote P2, remote-away, and cult-state diagnostics.");
         Console.WriteLine("Press Ctrl+C to stop.");
 
         while (!cancellationToken.IsCancellationRequested)
@@ -358,6 +358,11 @@ internal static partial class Program
             client.LastEnemyAuthoritySent = traceEvent.Timestamp;
             SendServerPacket(udpClient, remoteEndPoint, "server.enemy_authority", BuildEnemyAuthorityMessage(ledger, client, traceEvent.Timestamp));
         }
+
+        if (ShouldSendSaveAuthority(traceEvent.Category))
+        {
+            SendServerSaveChunksIfNeeded(udpClient, ledger, client, traceEvent.Timestamp, remoteEndPoint);
+        }
     }
 
     private static void SendServerPacket(UdpClient udpClient, System.Net.IPEndPoint remoteEndPoint, string category, string message)
@@ -417,6 +422,48 @@ internal static partial class Program
             || string.Equals(category, "sync.encounter_chance", StringComparison.Ordinal)
             || string.Equals(category, "sync.player_motion", StringComparison.Ordinal)
             || string.Equals(category, "live.heartbeat", StringComparison.Ordinal);
+    }
+
+    private static bool ShouldSendSaveAuthority(string category)
+    {
+        return string.Equals(category, "sync.save_chunk", StringComparison.Ordinal)
+            || string.Equals(category, "sync.save_ack", StringComparison.Ordinal)
+            || string.Equals(category, "sync.world_identity", StringComparison.Ordinal)
+            || string.Equals(category, "live.heartbeat", StringComparison.Ordinal);
+    }
+
+    private static void SendServerSaveChunksIfNeeded(UdpClient udpClient, LedgerState ledger, ClientLedger recipient, DateTimeOffset now, System.Net.IPEndPoint remoteEndPoint)
+    {
+        ServerSaveSnapshotLedger? snapshot = ledger.ServerSaveSnapshot;
+        if (snapshot == null || snapshot.Chunks.Count == 0 || string.IsNullOrWhiteSpace(snapshot.SnapshotId))
+        {
+            return;
+        }
+
+        if (string.Equals(recipient.ClientId, snapshot.SourceClientId, StringComparison.Ordinal)
+            || string.Equals(recipient.ServerRole, "host-lamb", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (string.Equals(recipient.LastSaveSnapshotAck, snapshot.SnapshotId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (string.Equals(recipient.LastSaveSnapshotSent, snapshot.SnapshotId, StringComparison.Ordinal)
+            && recipient.LastSaveSnapshotSentAt != null
+            && now - recipient.LastSaveSnapshotSentAt < TimeSpan.FromSeconds(5))
+        {
+            return;
+        }
+
+        recipient.LastSaveSnapshotSent = snapshot.SnapshotId;
+        recipient.LastSaveSnapshotSentAt = now;
+        for (int i = 0; i < snapshot.Chunks.Count; i++)
+        {
+            SendServerPacket(udpClient, remoteEndPoint, "server.save_chunk", BuildSaveChunkMessage(snapshot, recipient, now, i));
+        }
     }
 
     private static string BuildRosterMessage(LedgerState ledger, DateTimeOffset now)
@@ -844,6 +891,23 @@ internal static partial class Program
             + " preview=" + PacketValue(host.CombatPreview);
     }
 
+    private static string BuildSaveChunkMessage(ServerSaveSnapshotLedger snapshot, ClientLedger recipient, DateTimeOffset now, int chunkIndex)
+    {
+        string chunk = chunkIndex >= 0 && chunkIndex < snapshot.Chunks.Count ? snapshot.Chunks[chunkIndex] : "";
+        return "serverTime=" + now.ToUnixTimeMilliseconds()
+            + " target=" + PacketValue(recipient.ClientId)
+            + " snapshot=" + PacketValue(snapshot.SnapshotId)
+            + " source=" + PacketValue(snapshot.SourceClientId)
+            + " sourceSlot=" + (snapshot.SourceSlot?.ToString() ?? "unknown")
+            + " targetSlot=" + (snapshot.TargetSlot?.ToString() ?? "unknown")
+            + " chunk=" + chunkIndex
+            + " chunks=" + snapshot.Chunks.Count
+            + " rawBytes=" + (snapshot.RawBytes?.ToString() ?? "unknown")
+            + " compressedBytes=" + (snapshot.CompressedBytes?.ToString() ?? "unknown")
+            + " hash=" + PacketValue(snapshot.Hash)
+            + " data=" + chunk;
+    }
+
     private static string BuildServerPacket(string category, string message)
     {
         string timestamp = DateTimeOffset.UtcNow.ToString("O");
@@ -1141,6 +1205,16 @@ internal static partial class LedgerReducer
         if (category == "sync.world_identity")
         {
             return ApplyWorldIdentity(ledger, traceEvent, message);
+        }
+
+        if (category == "sync.save_chunk")
+        {
+            return ApplySaveChunk(ledger, traceEvent, message);
+        }
+
+        if (category == "sync.save_ack")
+        {
+            return ApplySaveAck(ledger, traceEvent, message);
         }
 
         if (category == "sync.cult_snapshot")
@@ -1494,6 +1568,152 @@ internal static partial class LedgerReducer
             + " structures=" + (client.StructuresCount?.ToString() ?? "unknown"));
     }
 
+    private static LedgerEvent? ApplySaveChunk(LedgerState ledger, TraceEvent traceEvent, string message)
+    {
+        string clientId = ReadClientId(message);
+        string sessionId = ReadSessionId(message);
+        string? snapshotId = ReadToken(message, "snapshot");
+        int? chunkIndex = ReadIntToken(message, "chunk");
+        int? chunks = ReadIntToken(message, "chunks");
+        string? data = ReadToken(message, "data");
+        if (string.IsNullOrWhiteSpace(snapshotId) || chunkIndex == null || chunks == null || chunks <= 0 || string.IsNullOrWhiteSpace(data))
+        {
+            return null;
+        }
+
+        AssignClientRoles(ledger, traceEvent.Timestamp);
+        if (!ledger.Clients.TryGetValue(clientId, out ClientLedger? client))
+        {
+            client = new ClientLedger(clientId)
+            {
+                FirstSeen = traceEvent.Timestamp,
+                JoinOrder = ++ledger.NextClientJoinOrder
+            };
+            ledger.Clients[clientId] = client;
+        }
+
+        client.SessionId = sessionId;
+        client.LastSeen = traceEvent.Timestamp;
+        client.LastCategory = "sync.save_chunk";
+
+        if (!IsAssignedHostClient(client))
+        {
+            return new LedgerEvent(
+                traceEvent.Timestamp,
+                "save",
+                "ignored non-host save chunk source=" + clientId
+                + " role=" + (client.ServerRole ?? "unknown")
+                + " snapshot=" + snapshotId);
+        }
+
+        SaveChunkAssemblyLedger assembly;
+        if (!ledger.SaveChunkAssemblies.TryGetValue(snapshotId, out assembly!))
+        {
+            assembly = new SaveChunkAssemblyLedger(snapshotId, chunks.Value)
+            {
+                SourceClientId = clientId,
+                SessionId = sessionId,
+                SourceSlot = ReadIntToken(message, "sourceSlot"),
+                TargetSlot = ReadIntToken(message, "targetSlot") ?? ledger.ServerSaveSlot,
+                RawBytes = ReadIntToken(message, "rawBytes"),
+                CompressedBytes = ReadIntToken(message, "compressedBytes"),
+                Hash = ReadToken(message, "hash"),
+                CreatedAt = traceEvent.Timestamp
+            };
+            ledger.SaveChunkAssemblies[snapshotId] = assembly;
+        }
+
+        if (chunkIndex.Value >= 0 && chunkIndex.Value < assembly.Chunks.Length)
+        {
+            assembly.Chunks[chunkIndex.Value] = data;
+            assembly.LastUpdatedAt = traceEvent.Timestamp;
+        }
+
+        if (!assembly.IsComplete)
+        {
+            int received = assembly.ReceivedChunkCount();
+            return new LedgerEvent(
+                traceEvent.Timestamp,
+                "save",
+                "chunk " + received + "/" + assembly.Chunks.Length
+                + " snapshot=" + snapshotId
+                + " source=" + clientId);
+        }
+
+        if (ledger.ServerSaveSnapshot != null && string.Equals(ledger.ServerSaveSnapshot.SnapshotId, snapshotId, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        ServerSaveSnapshotLedger snapshot = new()
+        {
+            SnapshotId = snapshotId,
+            SourceClientId = clientId,
+            SessionId = sessionId,
+            SourceSlot = assembly.SourceSlot,
+            TargetSlot = assembly.TargetSlot ?? ledger.ServerSaveSlot,
+            RawBytes = assembly.RawBytes,
+            CompressedBytes = assembly.CompressedBytes,
+            Hash = assembly.Hash,
+            CreatedAt = assembly.CreatedAt,
+            LastUpdatedAt = traceEvent.Timestamp,
+            Chunks = assembly.Chunks.Select(chunk => chunk ?? string.Empty).ToList()
+        };
+        ledger.ServerSaveSnapshot = snapshot;
+        foreach (ClientLedger other in ledger.Clients.Values)
+        {
+            other.LastSaveSnapshotSent = null;
+            other.LastSaveSnapshotSentAt = null;
+        }
+
+        PersistServerSaveSnapshot(ledger, snapshot);
+        return new LedgerEvent(
+            traceEvent.Timestamp,
+            "save",
+            "server snapshot ready id=" + snapshotId
+            + " source=" + clientId
+            + " sourceSlot=" + (snapshot.SourceSlot?.ToString() ?? "unknown")
+            + " targetSlot=" + (snapshot.TargetSlot?.ToString() ?? "unknown")
+            + " chunks=" + snapshot.Chunks.Count
+            + " rawBytes=" + (snapshot.RawBytes?.ToString() ?? "unknown")
+            + " compressedBytes=" + (snapshot.CompressedBytes?.ToString() ?? "unknown")
+            + " hash=" + (snapshot.Hash ?? "unknown"));
+    }
+
+    private static LedgerEvent? ApplySaveAck(LedgerState ledger, TraceEvent traceEvent, string message)
+    {
+        string clientId = ReadClientId(message);
+        string? snapshotId = ReadToken(message, "snapshot");
+        string? status = ReadToken(message, "status");
+        if (string.IsNullOrWhiteSpace(snapshotId))
+        {
+            return null;
+        }
+
+        if (!ledger.Clients.TryGetValue(clientId, out ClientLedger? client))
+        {
+            client = new ClientLedger(clientId)
+            {
+                FirstSeen = traceEvent.Timestamp,
+                JoinOrder = ++ledger.NextClientJoinOrder
+            };
+            ledger.Clients[clientId] = client;
+        }
+
+        client.SessionId = ReadSessionId(message);
+        client.LastSeen = traceEvent.Timestamp;
+        client.LastCategory = "sync.save_ack";
+        client.LastSaveSnapshotAck = snapshotId;
+        client.LastSaveSnapshotAckStatus = status ?? "unknown";
+        return new LedgerEvent(
+            traceEvent.Timestamp,
+            "save",
+            "ack " + clientId
+            + " snapshot=" + snapshotId
+            + " status=" + (status ?? "unknown")
+            + " targetSlot=" + (ReadToken(message, "targetSlot") ?? "unknown"));
+    }
+
     private static void EnsureServerWorld(LedgerState ledger, ClientLedger hostCandidate, DateTimeOffset timestamp)
     {
         if (ledger.ServerWorld != null)
@@ -1826,6 +2046,80 @@ internal static partial class LedgerReducer
         {
             ledger.AddRuleCandidate("server_world_persist_failed: " + ex.GetType().Name + ": " + ex.Message);
         }
+    }
+
+    private static void PersistServerSaveSnapshot(LedgerState ledger, ServerSaveSnapshotLedger snapshot)
+    {
+        if (snapshot == null || string.IsNullOrWhiteSpace(ledger.WorldsDirectory))
+        {
+            return;
+        }
+
+        try
+        {
+            string worldId = ledger.ServerWorld?.WorldId ?? "pending-world";
+            string saveDir = Path.Combine(ledger.WorldsDirectory, worldId, "save");
+            Directory.CreateDirectory(saveDir);
+
+            string safeSnapshot = SafeFileToken(snapshot.SnapshotId ?? "unknown");
+            byte[] compressed = CombineBase64Chunks(snapshot.Chunks);
+            File.WriteAllBytes(Path.Combine(saveDir, "snapshot_" + safeSnapshot + ".gz"), compressed);
+
+            JsonSerializerOptions serializerOptions = new()
+            {
+                WriteIndented = true,
+                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+            };
+            File.WriteAllText(
+                Path.Combine(saveDir, "latest_save_snapshot.json"),
+                JsonSerializer.Serialize(new
+                {
+                    snapshot.SnapshotId,
+                    snapshot.SourceClientId,
+                    snapshot.SessionId,
+                    snapshot.SourceSlot,
+                    snapshot.TargetSlot,
+                    snapshot.RawBytes,
+                    snapshot.CompressedBytes,
+                    snapshot.Hash,
+                    snapshot.CreatedAt,
+                    snapshot.LastUpdatedAt,
+                    ChunkCount = snapshot.Chunks.Count,
+                    Path = "snapshot_" + safeSnapshot + ".gz"
+                }, serializerOptions));
+        }
+        catch (Exception ex)
+        {
+            ledger.AddRuleCandidate("server_save_snapshot_persist_failed: " + ex.GetType().Name + ": " + ex.Message);
+        }
+    }
+
+    private static byte[] CombineBase64Chunks(IReadOnlyList<string> chunks)
+    {
+        using MemoryStream stream = new();
+        for (int i = 0; i < chunks.Count; i++)
+        {
+            byte[] bytes = Convert.FromBase64String(chunks[i]);
+            stream.Write(bytes, 0, bytes.Length);
+        }
+
+        return stream.ToArray();
+    }
+
+    private static string SafeFileToken(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "unknown";
+        }
+
+        StringBuilder sb = new(value.Length);
+        foreach (char c in value)
+        {
+            sb.Append(char.IsLetterOrDigit(c) || c == '-' || c == '_' ? c : '_');
+        }
+
+        return sb.ToString();
     }
 
     private static string StableShortHash(string value)
@@ -2635,6 +2929,8 @@ internal sealed class LedgerState(string tracePath)
     public List<RewardClaimLedger> RewardClaims { get; } = [];
     public List<EquipmentLedgerEvent> EquipmentEvents { get; } = [];
     public List<ServerDecisionLedger> ServerDecisions { get; } = [];
+    public Dictionary<string, SaveChunkAssemblyLedger> SaveChunkAssemblies { get; } = [];
+    public ServerSaveSnapshotLedger? ServerSaveSnapshot { get; set; }
     public List<string> RuleCandidates { get; } = [];
 
     public void AddRuleCandidate(string rule)
@@ -2691,6 +2987,10 @@ internal sealed class ClientLedger(string clientId)
     public DateTimeOffset? LastRewardClaimsSent { get; set; }
     public DateTimeOffset? LastSpellCastsSent { get; set; }
     public DateTimeOffset? LastEnemyAuthoritySent { get; set; }
+    public string? LastSaveSnapshotSent { get; set; }
+    public DateTimeOffset? LastSaveSnapshotSentAt { get; set; }
+    public string? LastSaveSnapshotAck { get; set; }
+    public string? LastSaveSnapshotAckStatus { get; set; }
     public string? CultSnapshotHash { get; set; }
     public bool? CultSnapshotMatch { get; set; }
     public int? CultFollowersCount { get; set; }
@@ -2739,6 +3039,8 @@ internal sealed class ClientLedger(string clientId)
             + " cultFollowers=" + (CultFollowersCount?.ToString() ?? "unknown")
             + " combatHash=" + (CombatHash ?? "unknown")
             + " combatMatch=" + (CombatMatch?.ToString() ?? "unknown")
+            + " saveAck=" + (LastSaveSnapshotAck ?? "unknown")
+            + " saveAckStatus=" + (LastSaveSnapshotAckStatus ?? "unknown")
             + " endpoint=" + (RemoteEndPoint ?? "unknown")
             + " last=" + (LastCategory ?? "unknown");
     }
@@ -2839,6 +3141,43 @@ internal sealed class ServerWorldClientLedger
     public string? CombatRounds { get; set; }
     public string? CombatPreview { get; set; }
     public DateTimeOffset LastSeen { get; set; }
+}
+
+internal sealed class SaveChunkAssemblyLedger(string snapshotId, int chunkCount)
+{
+    public string SnapshotId { get; } = snapshotId;
+    public string? SourceClientId { get; set; }
+    public string? SessionId { get; set; }
+    public int? SourceSlot { get; set; }
+    public int? TargetSlot { get; set; }
+    public int? RawBytes { get; set; }
+    public int? CompressedBytes { get; set; }
+    public string? Hash { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset LastUpdatedAt { get; set; }
+    public string?[] Chunks { get; } = new string[Math.Max(1, chunkCount)];
+
+    public bool IsComplete => Chunks.All(chunk => !string.IsNullOrWhiteSpace(chunk));
+
+    public int ReceivedChunkCount()
+    {
+        return Chunks.Count(chunk => !string.IsNullOrWhiteSpace(chunk));
+    }
+}
+
+internal sealed class ServerSaveSnapshotLedger
+{
+    public string? SnapshotId { get; set; }
+    public string? SourceClientId { get; set; }
+    public string? SessionId { get; set; }
+    public int? SourceSlot { get; set; }
+    public int? TargetSlot { get; set; }
+    public int? RawBytes { get; set; }
+    public int? CompressedBytes { get; set; }
+    public string? Hash { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset LastUpdatedAt { get; set; }
+    public List<string> Chunks { get; set; } = [];
 }
 
 internal sealed class PlayerLedger(string clientId, int playerId)

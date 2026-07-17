@@ -1,12 +1,12 @@
 param(
-    [int]$Port = 38631
+    [int]$Port = 38632
 )
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $serverProject = Join-Path $root 'src\COTLOnline.ServerLedger\COTLOnline.ServerLedger.csproj'
 $serverDll = Join-Path $root 'src\COTLOnline.ServerLedger\bin\Release\net10.0\COTLOnline.ServerLedger.dll'
-$artifactRoot = Join-Path $root 'artifacts\spell-relay-smoke'
+$artifactRoot = Join-Path $root 'artifacts\save-authority-smoke'
 $worlds = Join-Path $artifactRoot 'worlds'
 $stdout = Join-Path $artifactRoot 'server.out.log'
 $stderr = Join-Path $artifactRoot 'server.err.log'
@@ -19,18 +19,22 @@ if (-not (Test-Path -LiteralPath $serverDll)) {
     }
 }
 
+Remove-Item -LiteralPath $stdout, $stderr -Force -ErrorAction SilentlyContinue
+
 $arguments = @(
     ('"' + $serverDll + '"'),
     '--listen-udp',
     '--udp-port', $Port,
-    '--host-client-id', 'client-sol-host',
-    '--worlds-dir', ('"' + $worlds + '"')
+    '--host-client-id', 'client-save-host',
+    '--worlds-dir', ('"' + $worlds + '"'),
+    '--server-save-slot', '4'
 )
 
 $server = Start-Process -FilePath 'dotnet.exe' -ArgumentList $arguments -WindowStyle Hidden -PassThru `
     -RedirectStandardOutput $stdout -RedirectStandardError $stderr
 $hostClient = $null
 $remoteClient = $null
+$result = $null
 
 function Send-TraceEvent {
     param(
@@ -84,54 +88,62 @@ try {
     $hostClient.Connect('127.0.0.1', $Port)
     $remoteClient.Connect('127.0.0.1', $Port)
 
-    Send-TraceEvent $hostClient 'live.heartbeat' 'clientId=client-sol-host sessionId=host-session pluginVersion=0.5.35 scene=Dungeon2 location=Dungeon1_2 room=Room_A'
-    Send-TraceEvent $remoteClient 'live.heartbeat' 'clientId=client-sol-remote sessionId=remote-session pluginVersion=0.5.35 scene=Dungeon2 location=Dungeon1_2 room=Room_A'
+    Send-TraceEvent $hostClient 'live.heartbeat' 'clientId=client-save-host sessionId=host-session pluginVersion=0.5.35 scene=Base location=Base coop=True players=1'
+    Send-TraceEvent $remoteClient 'live.heartbeat' 'clientId=client-save-remote sessionId=remote-session pluginVersion=0.5.35 scene=Base location=Base coop=True players=1'
     [void](Receive-Category $hostClient 'server.roster' 1200)
     [void](Receive-Category $remoteClient 'server.roster' 1200)
 
-    Send-TraceEvent $hostClient 'sync.spell_cast' 'clientId=client-sol-host sessionId=host-session seq=7 playerID=0 curse=Fireball curseLevel=4 autoAim=False damageMultiplier=1 facingAngle=90 lookAngle=90 aimAngle=90 targetOffset=(0,5,0) pos=(1,2,0) scene=Dungeon2 location=Dungeon1_2 room=Room_A'
+    $snapshot = 'smoke-' + [Guid]::NewGuid().ToString('N').Substring(0, 10)
+    $raw = [Text.Encoding]::UTF8.GetBytes('cotlonline-save-authority-smoke')
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = -join ($sha.ComputeHash($raw) | ForEach-Object { $_.ToString('x2') })
+    }
+    finally {
+        $sha.Dispose()
+    }
+    $data = [Convert]::ToBase64String($raw)
 
-    $spellPacket = $null
-    for ($attempt = 0; $attempt -lt 12 -and $null -eq $spellPacket; $attempt++) {
-        Send-TraceEvent $remoteClient 'sync.player_input' "clientId=client-sol-remote sessionId=remote-session seq=$($attempt + 9) playerID=0 ax=0 ay=0 scene=Dungeon2 location=Dungeon1_2 room=Room_A"
-        $candidate = Receive-Category $remoteClient 'server.spell_casts' 400
+    Send-TraceEvent $hostClient 'sync.save_chunk' "clientId=client-save-host sessionId=host-session snapshot=$snapshot reason=smoke sourceSlot=4 targetSlot=4 chunk=0 chunks=1 rawBytes=$($raw.Length) compressedBytes=$($raw.Length) files=1 hash=$hash data=$data"
+
+    $savePacket = $null
+    for ($attempt = 0; $attempt -lt 12 -and $null -eq $savePacket; $attempt++) {
+        Send-TraceEvent $remoteClient 'live.heartbeat' "clientId=client-save-remote sessionId=remote-session pluginVersion=0.5.35 scene=Base location=Base seq=$attempt"
+        $candidate = Receive-Category $remoteClient 'server.save_chunk' 500
         if ($null -ne $candidate `
-            -and $candidate.message -match 'castCount=1' `
-            -and $candidate.message -match 'source=client-sol-host' `
-            -and $candidate.message -match 'seq=7' `
-            -and $candidate.message -match 'curse=Fireball') {
-            $spellPacket = $candidate
+            -and $candidate.message -match "snapshot=$snapshot" `
+            -and $candidate.message -match 'chunk=0' `
+            -and $candidate.message -match 'chunks=1' `
+            -and $candidate.message -match "hash=$hash" `
+            -and $candidate.message -match "data=$([Regex]::Escape($data))") {
+            $savePacket = $candidate
         }
         Start-Sleep -Milliseconds 60
     }
-    if ($null -eq $spellPacket) {
-        throw 'Remote client did not receive the expected host Fireball cast through server.spell_casts.'
+
+    if ($null -eq $savePacket) {
+        throw 'Remote client did not receive the expected server.save_chunk snapshot.'
     }
 
-    Send-TraceEvent $remoteClient 'sync.spell_cast' 'clientId=client-sol-remote sessionId=remote-session seq=11 playerID=0 curse=MegaSlash curseLevel=3 autoAim=False damageMultiplier=1 facingAngle=180 lookAngle=180 aimAngle=180 targetOffset=(-4,0,0) pos=(3,2,0) scene=Dungeon2 location=Dungeon1_2 room=Room_A'
+    Send-TraceEvent $remoteClient 'sync.save_ack' "clientId=client-save-remote sessionId=remote-session snapshot=$snapshot status=applied targetSlot=4"
+    Start-Sleep -Milliseconds 300
 
-    $returnPacket = $null
-    for ($attempt = 0; $attempt -lt 12 -and $null -eq $returnPacket; $attempt++) {
-        Send-TraceEvent $hostClient 'sync.player_input' "clientId=client-sol-host sessionId=host-session seq=$($attempt + 30) playerID=0 ax=0 ay=0 scene=Dungeon2 location=Dungeon1_2 room=Room_A"
-        $candidate = Receive-Category $hostClient 'server.spell_casts' 400
-        if ($null -ne $candidate `
-            -and $candidate.message -match 'castCount=1' `
-            -and $candidate.message -match 'source=client-sol-remote' `
-            -and $candidate.message -match 'role=remote-p2' `
-            -and $candidate.message -match 'seq=11' `
-            -and $candidate.message -match 'curse=MegaSlash') {
-            $returnPacket = $candidate
-        }
-        Start-Sleep -Milliseconds 60
-    }
-    if ($null -eq $returnPacket) {
-        throw 'Host client did not receive the expected remote P2 MegaSlash cast through server.spell_casts.'
+    $latest = Join-Path $worlds 'pending-world\save\latest_save_snapshot.json'
+    if (-not (Test-Path -LiteralPath $latest)) {
+        throw "Server did not persist latest_save_snapshot.json at $latest"
     }
 
-    [PSCustomObject]@{
+    $metadata = Get-Content -LiteralPath $latest -Raw | ConvertFrom-Json
+    if ($metadata.SnapshotId -ne $snapshot) {
+        throw "Persisted snapshot id was $($metadata.SnapshotId), expected $snapshot"
+    }
+
+    $result = [PSCustomObject]@{
         Result = 'PASS'
-        HostToRemote = $spellPacket.message
-        RemoteToHost = $returnPacket.message
+        Snapshot = $snapshot
+        Hash = $hash
+        RelayMessage = $savePacket.message
+        Metadata = $latest
     }
 }
 finally {
@@ -141,4 +153,8 @@ finally {
         Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
         [void]$server.WaitForExit(2000)
     }
+}
+
+if ($null -ne $result) {
+    $result
 }

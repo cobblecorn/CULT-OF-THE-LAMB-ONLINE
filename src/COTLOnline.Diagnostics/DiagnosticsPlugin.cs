@@ -13,7 +13,7 @@ namespace COTLOnline.Diagnostics
     {
         public const string PluginGuid = "com.codex.cotlonline.diagnostics";
         public const string PluginName = "COTL Online Diagnostics";
-        public const string PluginVersion = "0.5.34";
+        public const string PluginVersion = "0.5.35";
 
         private Harmony _harmony;
         private ConfigEntry<bool> _verboseSnapshots;
@@ -61,9 +61,14 @@ namespace COTLOnline.Diagnostics
         private ConfigEntry<bool> _phase11SpellRelayVisualOnly;
         private ConfigEntry<bool> _phase12RewardClaimRelay;
         private ConfigEntry<bool> _phase13CombatAuthorityDiagnostics;
+        private ConfigEntry<bool> _phase15ServerSaveAuthority;
+        private ConfigEntry<bool> _phase15CaptureHostSaveSnapshots;
+        private ConfigEntry<bool> _phase15ApplyServerSaveSnapshots;
+        private ConfigEntry<bool> _phase15BlockRemoteClientSaves;
         private ConfigEntry<string> _clientId;
         private ConfigEntry<string> _liveUdpHost;
         private ConfigEntry<int> _liveUdpPort;
+        private ConfigEntry<int> _phase15ServerSaveSlot;
         private ConfigEntry<float> _livePlayerMotionInterval;
         private ConfigEntry<float> _livePlayerInputInterval;
         private ConfigEntry<float> _phase6RemoteP2MaxAgeMs;
@@ -81,6 +86,7 @@ namespace COTLOnline.Diagnostics
         private ConfigEntry<float> _perfSlowTickThresholdMs;
         private ConfigEntry<float> _phase10ServerSeedWaitTimeoutSeconds;
         private ConfigEntry<float> _phase13CombatRosterIntervalSeconds;
+        private ConfigEntry<float> _phase15HostSaveSnapshotIntervalSeconds;
         private ConfigEntry<float> _runtimeSnapshotInterval;
         private ConfigEntry<float> _persistentSnapshotInterval;
         private ConfigEntry<float> _saveFileHashInterval;
@@ -448,11 +454,47 @@ namespace COTLOnline.Diagnostics
                 true,
                 "When enabled, emits compact enemy roster, combat spawn, world manipulation, and death-state diagnostics for server-owned combat tests.");
 
+            _phase15ServerSaveAuthority = Config.Bind(
+                "Phase15",
+                "ServerSaveAuthority",
+                true,
+                "When enabled, tests host-owned save snapshot transport through ServerLedger. The server save slot is treated as the online/LAN save slot.");
+
+            _phase15CaptureHostSaveSnapshots = Config.Bind(
+                "Phase15",
+                "CaptureHostSaveSnapshots",
+                true,
+                "When enabled on the assigned host-lamb client, captures the active save files, compresses them, and streams chunks to ServerLedger.");
+
+            _phase15ApplyServerSaveSnapshots = Config.Bind(
+                "Phase15",
+                "ApplyServerSaveSnapshots",
+                true,
+                "When enabled on remote clients, writes server-relayed host save snapshots into ServerSaveSlot.");
+
+            _phase15BlockRemoteClientSaves = Config.Bind(
+                "Phase15",
+                "BlockRemoteClientSaves",
+                true,
+                "When enabled on non-host clients, blocks SaveAndLoad.Save while connected so the host/server save remains authoritative.");
+
+            _phase15ServerSaveSlot = Config.Bind(
+                "Phase15",
+                "ServerSaveSlot",
+                4,
+                "Raw save slot used for the online/LAN server save copy. COTL's UI shows raw slot 4 as slot 5.");
+
             _phase13CombatRosterIntervalSeconds = Config.Bind(
                 "Phase13",
                 "CombatRosterIntervalSeconds",
                 1.0f,
                 "How often to emit sync.combat_roster while in dungeon rooms.");
+
+            _phase15HostSaveSnapshotIntervalSeconds = Config.Bind(
+                "Phase15",
+                "HostSaveSnapshotIntervalSeconds",
+                30.0f,
+                "How often the host sends a save snapshot if the active save files changed. SaveAndLoad.Save also triggers an immediate snapshot.");
 
             _clientId = Config.Bind(
                 "Live",
@@ -594,6 +636,14 @@ namespace COTLOnline.Diagnostics
                 _phase13CombatAuthorityDiagnostics.Value,
                 _phase13CombatRosterIntervalSeconds.Value);
             Logger.LogInfo("Diagnostics startup checkpoint: phase 13 combat authority diagnostics configured.");
+            BridgeSaveAuthority.Configure(
+                _phase15ServerSaveAuthority.Value,
+                _phase15CaptureHostSaveSnapshots.Value,
+                _phase15ApplyServerSaveSnapshots.Value,
+                _phase15BlockRemoteClientSaves.Value,
+                _phase15ServerSaveSlot.Value,
+                _phase15HostSaveSnapshotIntervalSeconds.Value);
+            Logger.LogInfo("Diagnostics startup checkpoint: phase 15 server save authority configured.");
             WorldSnapshotSampler.Configure(
                 _verboseSnapshots.Value,
                 _runtimeSnapshotInterval.Value,
@@ -634,6 +684,7 @@ namespace COTLOnline.Diagnostics
             BridgePerfProfiler.Measure("BridgeLoadoutAuthority", BridgeLoadoutAuthority.Tick);
             BridgePerfProfiler.Measure("BridgeRewardClaimAuthority", BridgeRewardClaimAuthority.Tick);
             BridgePerfProfiler.Measure("BridgeCombatAuthority", BridgeCombatAuthority.Tick);
+            BridgePerfProfiler.Measure("BridgeSaveAuthority", BridgeSaveAuthority.Tick);
             BridgePerfProfiler.Measure("BridgeCameraSplit", BridgeCameraSplit.Tick);
             BridgePerfProfiler.Measure("BridgeRunAuthority", BridgeRunAuthority.Tick);
             BridgePerfProfiler.Measure("LiveHeartbeat", RecordLiveHeartbeat);

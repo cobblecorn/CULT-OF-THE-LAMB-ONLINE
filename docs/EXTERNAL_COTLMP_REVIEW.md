@@ -87,3 +87,5 @@ The global patches are also broad. Blocking every non-lamb player from updates, 
 ## Current Project Implication
 
 The external fork supports the direction we are already taking: save/world authority plus scoped manipulation of the vanilla co-op slot. It does not replace `COTLOnline.ServerLedger`. The most important lesson is that movement mirroring is the easy layer; enemy events, follower jobs, room transitions, and save ownership need host/server authority instead of trying to reconcile two independent simulations after they drift.
+
+The reported "building placement breaks sync" behavior is consistent with a snapshot/reconciliation design rather than true live world authority. Save transfer can make clients enter the same world, and periodic snapshots can repair some drift, but construction, follower work, resource deposits, faith changes, and room/event triggers are live mutations. Our hybrid path should therefore treat the fork's save work as an entry/rejoin baseline and implement building/follower/enemy changes as ordered commands with one authority source.

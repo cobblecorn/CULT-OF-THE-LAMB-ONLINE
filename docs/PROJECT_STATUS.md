@@ -7,7 +7,7 @@ This repository is an experimental online-play research workspace for Cult of th
 - `COTLOnline.Diagnostics` is the BepInEx plugin loaded by each game client.
 - `COTLOnline.ServerLedger` is a UDP/server-ledger prototype that assigns host/remote roles and relays compact server packets.
 - Save slot 4 is currently treated as the shared online test slot.
-- The most recent build line is `0.5.34`, which adds scoped bridge-owned body guards on top of observe-only host enemy authority.
+- The most recent build line is `0.5.35`, which starts guarded server-save authority on top of scoped bridge-owned body guards and observe-only host enemy authority.
 
 ## What Works Best So Far
 
@@ -23,7 +23,7 @@ This repository is an experimental online-play research workspace for Cult of th
 - Follower/cult AI is still locally simulated and diverges quickly after matching save loads.
 - Death/revive/game-over needs an explicit online rule instead of relying on vanilla local transitions.
 - Spell visuals are still experimental and may fail per curse type or body/room mismatch.
-- The server-owned save/world model is not implemented yet; slot 4 is only a shared baseline.
+- Server-save authority is now an alpha transport/apply layer for the reserved online slot. It does not yet make live building placement, follower jobs, enemies, or room events server-authoritative.
 
 ## Next Milestones
 
@@ -32,6 +32,7 @@ This repository is an experimental online-play research workspace for Cult of th
 3. Gate special encounters so the host/server decides when an evil follower or event starts.
 4. Add an online death rule, likely downed/spectator first, before any revive mechanics.
 5. Convert cult/follower sync from save-hash comparison to host-authored follower commands.
+6. Convert building placement, construction progress, resource deposits, and similar cult mutations into ordered server world commands instead of relying on save snapshot reconciliation.
 
 ## Build Notes
 
